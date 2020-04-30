@@ -13,12 +13,13 @@ from scripts import gee_functions
 ee.Initialize()
 
 missions_bands = {
-    'sentinel1': ['VV', 'VH']
+    'sentinel1': ['VV', 'VH'],
+    'landsat8_t1sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11', 'sr_aerosol', 'pixel_qa', 'radsat_qa']
 }
 
 
-#TODO: Create an imagery directory
-
+# TODO: Create an imagery directory
+#    :
 
 
 class get_gee_data:
@@ -50,7 +51,7 @@ class get_gee_data:
                        - Sentinel 2 - surface reflectance level: "sentinel2_sr"
                        - Sentinel 2 - top of atmosphere reflectance: "sentinel2_toa"
                        - Sentinel 1: "sentinel1"
-                       - Landsat 8:
+                       - Landsat 8: "landsat8_t1sr"
 
            Attributes
            ----------
@@ -98,7 +99,7 @@ class get_gee_data:
 
             if len(datestest) > 1:
                 datesreduce.append(datetime.datetime.fromtimestamp(np.round(np.array(datestest).mean())))
-            #elif isinstance(datestest, float):
+            # elif isinstance(datestest, float):
             #    datesreduce.append(datetime.datetime.fromtimestamp(datestest))
             elif len(datestest) == 1:
                 datesreduce.append(datetime.datetime.fromtimestamp(datestest[0]))
@@ -110,15 +111,15 @@ class get_gee_data:
         if self.mission == "sentinel1":
             self._mission = 'COPERNICUS/S1_GRD'
             self._prefix = 's1_grd'
-
         if self.mission == 'sentinel2_toa':
             self._mission = 'COPERNICUS/S2'
             self._prefix = 's2_l1c'
-
         if self.mission == 'sentinel2_sr':
             self._mission = 'COPERNICUS/S2_SR'
             self._prefix = 's2_l2a'
-
+        if self.mission == 'landsat8_t1sr':
+            self._mission = 'LANDSAT/LC08/C01/T1_SR'
+            self._prefix = 'l8_t1sr'
 
     def reduce_by_days(self, days):
 
@@ -140,7 +141,9 @@ class get_gee_data:
                  end_date,
                  roi_filename,
                  mission,
-                 bands=None):
+                 bands=None,
+                 cloud_percentage=100,
+                 remove_clouds=True):
 
         ### set initial properties
         self.mission = mission
@@ -149,10 +152,7 @@ class get_gee_data:
         ## get spatial points
         self._ee_sp = geometry_as_ee(roi_filename)
 
-        if bands is None:
-            self._bands = missions_bands[mission]
-        else:
-            self._bands = bands
+        self._bands = missions_bands[mission]
 
         ### mission reference setting
         self._poperties_mission()
@@ -166,12 +166,29 @@ class get_gee_data:
         self._dates_reduced = None
 
         if mission == "sentinel1":
+            if bands is not None:
+                self._bands = bands
+
             for band in self._bands:
                 self.image_collection = self.image_collection.filter(
                     ee.Filter.eq('instrumentMode', 'IW')
                 ).filter(
-                       ee.Filter.listContains('transmitterReceiverPolarisation', band)
+                    ee.Filter.listContains('transmitterReceiverPolarisation', band)
                 )
+
+        if mission == "landsat8_t1sr":
+            self.image_collection = self.image_collection.filterMetadata('CLOUD_COVER', 'less_than', cloud_percentage)
+            if remove_clouds is True:
+                print(3)
+                self.image_collection = self.image_collection.map(
+                    lambda img: maskL8sr(img))
+
+            if bands is not None:
+                self._bands = bands
+                self.image_collection = self.image_collection.select(self._bands).map(
+                    lambda image:
+                    image.resample('bilinear')
+                  )
 
 
 ### functions
@@ -194,10 +211,15 @@ def geometry_as_ee(filename):
 
 ###
 
-#def mask_noise_s1(image):
+# def mask_noise_s1(image):
 #    edge = ee.Image(image).lt(-30.0)
 #    maskedImage = ee.Image(image).mask().and(edge.not())
 #    return image.updateMask(maskedImage)
+
+
+def add_normalized_vegetation_indexes(image, bands, viname):
+    return image.addBands(
+        image.normalizedDifference([bands[0], bands[1]]).rename(viname))
 
 
 def unzip_files(filepath, outputpath):
@@ -209,15 +231,16 @@ def unzip_files(filepath, outputpath):
     return filesunzipped
 
 
-def get_imageprperties(filename,outputfolder, scale):
+def get_imageprperties(filename, outputfolder, scale):
     datestr = filename[filename.index('_20') + 1:filename.index('_20') + 9]
     prefixgee = filename[len(outputfolder) + 1:filename.index('_20')]
     regionid = filename[filename.index(datestr) + 9:filename.index(str(scale) + 'm') - 1]
     return [prefixgee, datestr, regionid]
 
+
 def s1_imagesunzip(zipfilename, outputfolder, imgbands, scale):
     filenamesunzipped = unzip_files(zipfilename + '.zip', outputfolder)
-    imgargs = get_imageprperties(zipfilename,outputfolder, scale)
+    imgargs = get_imageprperties(zipfilename, outputfolder, scale)
     for bandsindex in range(len(imgbands)):
 
         filesperband = np.array([x for x in filenamesunzipped if imgbands[bandsindex] in x])
@@ -311,7 +334,7 @@ def query_image_collection(initdate, enddate, satellite_mission, ee_sp):
 def reduce_meanimagesbydates(satcollection, date_init, date_end):
     # imagesfiltered = ee.ImageCollection(satcollection.filterDate(date_init, date_end))
 
-    #datefirst_image = ee.Number(ee.Image(satcollection.filterDate(date_init, date_end).first().get('system:time_start')))
+    # datefirst_image = ee.Number(ee.Image(satcollection.filterDate(date_init, date_end).first().get('system:time_start')))
     outputimage = ee.Image(satcollection.filterDate(date_init, date_end).mean())
 
     return outputimage
@@ -371,3 +394,14 @@ def toImage(lats, lons, data):
                 counter += 1
                 arr[len(uniqueLats) - 1 - y, x] = data[counter]  # we start from lower left corner
     return arr
+
+
+def maskL8sr(image):
+    # Bits 3 and 5 are cloud shadow and cloud, respectively.
+    cloudShadowBitMask = (1 << 3)
+    cloudsBitMask = (1 << 5)
+    # Get the pixel QA band.
+    qa = image.select('pixel_qa')
+    # Both flags should be set to zero, indicating clear conditions.
+    mask1 = qa.bitwiseAnd(ee.Number(cloudShadowBitMask)).eq(0) and qa.bitwiseAnd(cloudsBitMask).eq(0)
+    return image.mask(mask1.eq(1))

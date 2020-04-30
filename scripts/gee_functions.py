@@ -8,3 +8,6 @@ def getfeature_fromeedict(eecollection, attribute, featname):
         ## check if it has info
         aux.append(datadict)
     return (aux)
+
+
+
