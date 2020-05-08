@@ -1,20 +1,28 @@
 import datetime
 import ee
-import json
+
 import os
 import wget
 import pandas as pd
 import numpy as np
-import geopandas as gpd
-from zipfile import ZipFile
+
+import folium
+import geehydro
 
 from scripts import gee_functions
+from scripts import gis_functions
+from scripts import general_functions
 
 ee.Initialize()
 
 missions_bands = {
     'sentinel1': ['VV', 'VH'],
     'landsat8_t1sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11', 'sr_aerosol', 'pixel_qa', 'radsat_qa']
+}
+
+landsat_stdnames = {
+    'B1': 'coastal', 'B2': 'blue', 'B3': 'green', 'B4': 'red', 'B5': 'nir', 'B10': 'swir1', 'B11': 'swir2',
+    'pixel_qa': 'pixel_qa', 'radsat_qa': 'qa_class'
 }
 
 
@@ -78,10 +86,30 @@ class get_gee_data:
         return pd.Series(gee_functions.getfeature_fromeedict(self.image_collection.getInfo(),
                                                              'properties',
                                                              'orbitProperties_pass'))
-
     @property
     def length(self):
         return self.image_collection.size().getInfo()
+
+    @property
+    def geometry(self):
+        return self._ee_sp.getInfo()['coordinates'][0]
+
+    @property
+    def summary(self):
+        return pd.DataFrame({'dates': self.dates,
+                             'cover_percentage': self.coverarea})
+
+    @property
+    def coverarea(self):
+
+        coverareas = pd.Series(
+            gee_functions.getfeature_fromeedict(self.image_collection.getInfo(),
+                                                'properties',
+                                                'cover_percentage')
+        )
+
+        return coverareas
+
 
     def _get_dates_afterreduction(self, days):
         dates = date_listperdays(self.image_collection, days)
@@ -108,6 +136,7 @@ class get_gee_data:
     def _poperties_mission(self):
 
         self._prefix = None
+
         if self.mission == "sentinel1":
             self._mission = 'COPERNICUS/S1_GRD'
             self._prefix = 's1_grd'
@@ -120,6 +149,13 @@ class get_gee_data:
         if self.mission == 'landsat8_t1sr':
             self._mission = 'LANDSAT/LC08/C01/T1_SR'
             self._prefix = 'l8_t1sr'
+
+    def _set_coverpercentageasproperty(self):
+
+        self.image_collection = self.image_collection.map(lambda img:
+                                                          img.set('cover_percentage',
+                                                                  gee_functions.get_eeimagecover_percentage(img,
+                                                                                                            self._ee_sp)))
 
     def reduce_by_days(self, days):
 
@@ -150,7 +186,7 @@ class get_gee_data:
 
         self._dates = [start_date, end_date]
         ## get spatial points
-        self._ee_sp = geometry_as_ee(roi_filename)
+        self._ee_sp = gee_functions.geometry_as_ee(roi_filename)
 
         self._bands = missions_bands[mission]
 
@@ -160,7 +196,7 @@ class get_gee_data:
         self.image_collection = query_image_collection(ee.Date(start_date),
                                                        ee.Date(end_date),
                                                        self._mission,
-                                                       self._ee_sp).select(self._bands)
+                                                       self._ee_sp)#.select(self._bands)
 
         self._imagreducedbydays = None
         self._dates_reduced = None
@@ -177,9 +213,8 @@ class get_gee_data:
                 )
 
         if mission == "landsat8_t1sr":
-            self.image_collection = self.image_collection.filterMetadata('CLOUD_COVER', 'less_than', cloud_percentage)
+            self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUD_COVER', 'less_than', cloud_percentage)
             if remove_clouds is True:
-                print(3)
                 self.image_collection = self.image_collection.map(
                     lambda img: maskL8sr(img))
 
@@ -188,25 +223,16 @@ class get_gee_data:
                 self.image_collection = self.image_collection.select(self._bands).map(
                     lambda image:
                     image.resample('bilinear')
-                  )
+                )
+
+        self._set_coverpercentageasproperty()
+
+    @orbit.setter
+    def orbit(self, value):
+        self._orbit = value
 
 
 ### functions
-
-
-### ee geometry
-def geometry_as_ee(filename):
-    '''transform shapefile format to ee geometry'''
-    ### read csv file
-    sp_geometry = gpd.read_file(filename)
-    ## reproject spatial data
-    if sp_geometry.crs['init'] != 'epsg:4326':
-        sp_geometry = sp_geometry.to_crs({'init': 'epsg:4326'})
-
-    ## get geometry points in json format
-    jsonFormat = json.loads(sp_geometry.to_json())['features'][0]['geometry']
-
-    return ee.Geometry.Polygon(jsonFormat['coordinates'])
 
 
 ###
@@ -222,15 +248,6 @@ def add_normalized_vegetation_indexes(image, bands, viname):
         image.normalizedDifference([bands[0], bands[1]]).rename(viname))
 
 
-def unzip_files(filepath, outputpath):
-    with ZipFile(filepath, 'r') as zipObj:
-        # Get list of files names in zip
-        filesunzipped = zipObj.namelist()
-        zipObj.extractall(outputpath)
-
-    return filesunzipped
-
-
 def get_imageprperties(filename, outputfolder, scale):
     datestr = filename[filename.index('_20') + 1:filename.index('_20') + 9]
     prefixgee = filename[len(outputfolder) + 1:filename.index('_20')]
@@ -239,7 +256,7 @@ def get_imageprperties(filename, outputfolder, scale):
 
 
 def s1_imagesunzip(zipfilename, outputfolder, imgbands, scale):
-    filenamesunzipped = unzip_files(zipfilename + '.zip', outputfolder)
+    filenamesunzipped = general_functions.unzip_files(zipfilename + '.zip', outputfolder)
     imgargs = get_imageprperties(zipfilename, outputfolder, scale)
     for bandsindex in range(len(imgbands)):
 
@@ -259,27 +276,6 @@ def s1_imagesunzip(zipfilename, outputfolder, imgbands, scale):
     os.remove(zipfilename + '.zip')
 
 
-def get_eeurl(imagecollection, geometry, scale=10):
-    imagesurls = []
-
-    listimages = imagecollection.toList(imagecollection.size());
-
-    for i in range(imagecollection.size().getInfo()):
-        try:
-            imagesurls.append(ee.Image(listimages.get(ee.Number(i))).getDownloadUrl({
-                'scale': scale,  # for resolution of image
-                'crs': 'EPSG:4326',  # which crs-transformation should apply
-                'region': geometry  # polygon region
-            }))
-        except:
-            imagesurls.append(ee.Image(listimages.get(ee.Number(i))).getDownloadUrl({
-                'scale': scale,  # for resolution of image
-                'crs': 'EPSG:4326',  # which crs-transformation should apply
-                'region': geometry  # polygon region
-            }))
-    return imagesurls
-
-
 def download_gee_tolocal(geedata_class, outputfolder, regionid="", scale=10):
     if isinstance(geedata_class, get_gee_data):
 
@@ -291,7 +287,7 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="", scale=10):
             dates = geedata_class._dates_reduced
 
         ## get urls list from gee
-        urls_list = get_eeurl(imgcollection, geedata_class._ee_sp['coordinates'], scale)
+        urls_list = gee_functions.get_eeurl(imgcollection, geedata_class._ee_sp['coordinates'], scale)
 
         ## change dates format
 
@@ -360,41 +356,28 @@ def reduce_imgs_by_days(image_collection, days):
                                                  ee.List(dates.get(ee.Number(n))).get(1)))
 
 
+def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):
+    ## get the map center coordinates from the geometry
+    centergeometry = gis_functions.geometry_center(geometry)
+    Map = folium.Map(location=[centergeometry[1],
+                               centergeometry[0]], zoom_start=zoom)
+
+    if visparameters is not None:
+        Map.addLayer(ee.Image(imagetoplot), visparameters, 'gee image')
+    else:
+        Map.addLayer(ee.Image(imagetoplot), {}, 'gee image')
+
+    ## add geometry
+    if geometry is not None:
+        eegeom = gis_functions.polygon_fromgeometry(geometry)
+        eegeom = gee_functions.geometry_as_ee(eegeom)
+        Map.addLayer(ee.Image().paint(eegeom, 1, 3), {}, 'region of interest:')
+
+    Map.setControlVisibility(layerControl=True, fullscreenControl=True, latLngPopup=True)
+    return (Map)
+
+
 # def download_images(image_list):
-
-def LatLonImg(img, geometry, scale):
-    img = img.addBands(ee.Image.pixelLonLat())
-
-    img = img.reduceRegion(reducer=ee.Reducer.toList(), geometry=geometry, maxPixels=1e13, scale=scale)
-
-    data = np.array((ee.Array(img.get("result")).getInfo()))
-    lats = np.array((ee.Array(img.get("latitude")).getInfo()))
-    lons = np.array((ee.Array(img.get("longitude")).getInfo()))
-    return lats, lons, data
-
-
-# covert the lat, lon and array into an image
-def toImage(lats, lons, data):
-    # get the unique coordinates
-    uniqueLats = np.unique(lats)
-    uniqueLons = np.unique(lons)
-
-    # get number of columns and rows from coordinates
-    ncols = len(uniqueLons)
-    nrows = len(uniqueLats)
-
-    # create an array with dimensions of image
-    arr = np.zeros([nrows, ncols], np.float32)  # -9999
-
-    # fill the array with values
-    counter = 0
-    for y in range(0, len(arr), 1):
-        for x in range(0, len(arr[0]), 1):
-            if lats[counter] == uniqueLats[y] and lons[counter] == uniqueLons[x] and counter < len(lats) - 1:
-                counter += 1
-                arr[len(uniqueLats) - 1 - y, x] = data[counter]  # we start from lower left corner
-    return arr
-
 
 def maskL8sr(image):
     # Bits 3 and 5 are cloud shadow and cloud, respectively.
