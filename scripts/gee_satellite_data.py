@@ -17,12 +17,15 @@ ee.Initialize()
 
 missions_bands = {
     'sentinel1': ['VV', 'VH'],
-    'landsat8_t1sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11', 'sr_aerosol', 'pixel_qa', 'radsat_qa']
+    'landsat8_t1sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11', 'sr_aerosol', 'pixel_qa', 'radsat_qa'],
+    'sentinel2_sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A','B9', 'B11', 'B12',
+                    'QA60', 'MSK_CLDPRB', "SCL"]
 }
 
 landsat_stdnames = {
     'B1': 'coastal', 'B2': 'blue', 'B3': 'green', 'B4': 'red', 'B5': 'nir', 'B10': 'swir1', 'B11': 'swir2',
     'pixel_qa': 'pixel_qa', 'radsat_qa': 'qa_class'
+
 }
 
 
@@ -86,6 +89,7 @@ class get_gee_data:
         return pd.Series(gee_functions.getfeature_fromeedict(self.image_collection.getInfo(),
                                                              'properties',
                                                              'orbitProperties_pass'))
+
     @property
     def length(self):
         return self.image_collection.size().getInfo()
@@ -109,7 +113,6 @@ class get_gee_data:
         )
 
         return coverareas
-
 
     def _get_dates_afterreduction(self, days):
         dates = date_listperdays(self.image_collection, days)
@@ -193,10 +196,10 @@ class get_gee_data:
         ### mission reference setting
         self._poperties_mission()
         ###
-        self.image_collection = query_image_collection(ee.Date(start_date),
-                                                       ee.Date(end_date),
-                                                       self._mission,
-                                                       self._ee_sp)#.select(self._bands)
+        self.image_collection = gee_functions.query_image_collection(ee.Date(start_date),
+                                                                     ee.Date(end_date),
+                                                                     self._mission,
+                                                                     self._ee_sp)
 
         self._imagreducedbydays = None
         self._dates_reduced = None
@@ -213,7 +216,8 @@ class get_gee_data:
                 )
 
         if mission == "landsat8_t1sr":
-            self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUD_COVER', 'less_than', cloud_percentage)
+            self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUD_COVER', 'less_than',
+                                                                                             cloud_percentage)
             if remove_clouds is True:
                 self.image_collection = self.image_collection.map(
                     lambda img: maskL8sr(img))
@@ -224,6 +228,16 @@ class get_gee_data:
                     lambda image:
                     image.resample('bilinear')
                 )
+
+        if mission == "sentinel2_sr":
+            self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUDY_PIXEL_PERCENTAGE', 'less_than',
+                                                                                             cloud_percentage)
+            if remove_clouds is True:
+                self.image_collection = self.image_collection.map(
+                    lambda img: maskS2sr(img))
+
+            if bands is not None:
+                self._bands = bands
 
         self._set_coverpercentageasproperty()
 
@@ -320,13 +334,6 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="", scale=10):
         print("the input file must be a get_gee_data class")
 
 
-def query_image_collection(initdate, enddate, satellite_mission, ee_sp):
-    '''mission data query'''
-
-    ## mission data query
-    return ee.ImageCollection(satellite_mission).filterDate(initdate, enddate).filterBounds(ee_sp)
-
-
 def reduce_meanimagesbydates(satcollection, date_init, date_end):
     # imagesfiltered = ee.ImageCollection(satcollection.filterDate(date_init, date_end))
 
@@ -388,3 +395,17 @@ def maskL8sr(image):
     # Both flags should be set to zero, indicating clear conditions.
     mask1 = qa.bitwiseAnd(ee.Number(cloudShadowBitMask)).eq(0) and qa.bitwiseAnd(cloudsBitMask).eq(0)
     return image.mask(mask1.eq(1))
+
+
+def maskS2sr(image):
+    # Bits 10 and 11 are clouds and cirrus, respectively.
+    cloudBitMask = ee.Number(2).pow(10).int()
+    cirrusBitMask = ee.Number(2).pow(11).int()
+    qa = image.select('QA60')
+    mask = qa.bitwiseAnd(cloudBitMask).eq(0) and (qa.bitwiseAnd(cirrusBitMask).eq(0))
+    ## filtering using the scene layer classification
+    scl = image.select('SCL');
+    mask1 = scl.eq(0) or (scl.eq(3)) or (scl.eq(9)) or (scl.eq(8)) or (scl.eq(10)) or (scl.eq(11))
+
+    return image.mask(mask1.eq(0)).mask(mask.eq(1))
+

@@ -77,6 +77,13 @@ def get_eeurl(imagecollection, geometry, scale=10):
     return imagesurls
 
 
+def query_image_collection(initdate, enddate, satellite_mission, ee_sp):
+    '''mission data query'''
+
+    ## mission data query
+    return ee.ImageCollection(satellite_mission).filterDate(initdate, enddate).filterBounds(ee_sp)
+
+
 def LatLonImg(img, geometry, scale):
     img = img.addBands(ee.Image.pixelLonLat())
 
