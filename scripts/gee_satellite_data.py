@@ -1,6 +1,6 @@
 import datetime
 import ee
-
+import collections
 import os
 import wget
 import pandas as pd
@@ -160,6 +160,18 @@ class get_gee_data:
                                                                   gee_functions.get_eeimagecover_percentage(img,
                                                                                                             self._ee_sp)))
 
+    def check_duplicated_tiles(self):
+
+        ## take the dates from filenames
+
+        dates_str_format = [date_i.strftime('%Y%m%d') for date_i in self.dates]
+        dates_duplicated = []
+        ## compare number of elements
+        if (len(dates_str_format) != len(set(dates_str_format))):
+            dates_duplicated = [item for item, count in collections.Counter(dates_str_format).items() if count > 1]
+            dates_notduplicated =[item for item, count in collections.Counter(dates_str_format).items() if count == 1]
+        return [len(dates_str_format) != len(set(dates_str_format)), dates_duplicated,dates_notduplicated]
+
     def reduce_by_days(self, days):
 
         ## remove those elements with null data
@@ -175,6 +187,43 @@ class get_gee_data:
                                                          )
         self._dates_reduced = self._get_dates_afterreduction(days)
         return self._imagreducedbydays
+
+    def reduce_duplicatedates(self):
+        reducedimages = []
+        for dateindex in range(len(self._checkmultyple_tiles[1])):
+            ## get indexes from summary
+            indexesdup = list(self.summary.loc[self.summary.dates.apply(
+                lambda x: x.strftime("%Y%m%d")) ==
+                                                   self._checkmultyple_tiles[1][dateindex]].index)
+
+            imageslist = []
+
+            ## image reduction
+            # get collection
+            for eeimageindex in indexesdup:
+                imageslist.append(self.image_collection.toList(self.image_collection.size()).get(eeimageindex))
+
+            bandnames = ee.Image(
+                self.image_collection.toList(self.image_collection.size()).get(eeimageindex)).bandNames()
+
+            imagereduced = ee.ImageCollection(ee.List(imageslist)).reduce(ee.Reducer.mean())
+            imagereduced = imagereduced.select(imagereduced.bandNames(), bandnames)
+
+            ## set properties
+            datetoimage = datetime.datetime.timestamp(
+                datetime.datetime.strptime(str(self._checkmultyple_tiles[1][dateindex]), '%Y%m%d'))*1000
+            reducedimages.append(imagereduced.set('system:time_start', ee.Number(datetoimage)))
+
+        for dateindex in range(len(self._checkmultyple_tiles[2])):
+            indexesdup = list(self.summary.loc[self.summary.dates.apply(
+                lambda x: x.strftime("%Y%m%d")) ==
+                                                   self._checkmultyple_tiles[2][dateindex]].index)
+
+            reducedimages.append(self.image_collection.toList(self.image_collection.size()).get(indexesdup[0]))
+
+        imagecollection = ee.ImageCollection(ee.List(reducedimages)).sort('system:time_start')
+        return imagecollection
+        
 
     def __init__(self, start_date,
                  end_date,
@@ -229,6 +278,7 @@ class get_gee_data:
                     image.resample('bilinear')
                 )
 
+
         if mission == "sentinel2_sr":
             self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUDY_PIXEL_PERCENTAGE', 'less_than',
                                                                                              cloud_percentage)
@@ -239,7 +289,13 @@ class get_gee_data:
             if bands is not None:
                 self._bands = bands
 
+
         self._set_coverpercentageasproperty()
+
+        self._checkmultyple_tiles = self.check_duplicated_tiles()
+        if self._checkmultyple_tiles[0] == True and (mission == "sentinel2_sr" or mission == "landsat8_t1sr"):
+            self.image_collection = self.reduce_duplicatedates()
+            self._set_coverpercentageasproperty()
 
     @orbit.setter
     def orbit(self, value):
@@ -402,10 +458,22 @@ def maskS2sr(image):
     cloudBitMask = ee.Number(2).pow(10).int()
     cirrusBitMask = ee.Number(2).pow(11).int()
     qa = image.select('QA60')
-    mask = qa.bitwiseAnd(cloudBitMask).eq(0) and (qa.bitwiseAnd(cirrusBitMask).eq(0))
+    mask0 = qa.bitwiseAnd(cloudBitMask).eq(0) and (qa.bitwiseAnd(cirrusBitMask).eq(0))
     ## filtering using the scene layer classification
-    scl = image.select('SCL');
-    mask1 = scl.eq(0) or (scl.eq(3)) or (scl.eq(9)) or (scl.eq(8)) or (scl.eq(10)) or (scl.eq(11))
+    scl = image.select('SCL')
+    masknodata = scl.eq(0)
+    maskshadow = scl.eq(3)
+    maskclouds = scl.gte(8)
+    imageaftermask0 = ee.Image(image).mask(mask0.eq(1))
+    imageaftermaskshadow = imageaftermask0.mask(maskshadow.eq(0))
+    imageafterclouds = imageaftermaskshadow.mask(maskclouds.eq(0))
 
-    return image.mask(mask1.eq(0)).mask(mask.eq(1))
+    return imageafterclouds.updateMask(masknodata.eq(0))
+
+def merge_eeimages(eelist, bandnames):
+
+    meannames = [i + "_mean" for i in bandnames]
+    return ee.ImageCollection(eelist).reduce(ee.Reducer.mean()).select(meannames, bandnames)
+
+
 
