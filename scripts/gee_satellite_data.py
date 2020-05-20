@@ -5,13 +5,17 @@ import os
 import wget
 import pandas as pd
 import numpy as np
-
+import warnings
 import folium
 import geehydro
 
+from datetime import timedelta
 from scripts import gee_functions
 from scripts import gis_functions
 from scripts import general_functions
+from scripts import l8_functions
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 ee.Initialize()
 
@@ -25,9 +29,14 @@ missions_bands = {
 landsat_stdnames = {
     'B1': 'coastal', 'B2': 'blue', 'B3': 'green', 'B4': 'red', 'B5': 'nir', 'B10': 'swir1', 'B11': 'swir2',
     'pixel_qa': 'pixel_qa', 'radsat_qa': 'qa_class'
-
 }
 
+s2_stdnames = {
+    'B1': 'coastal', 'B2': 'blue', 'B3': 'green', 'B4': 'red',
+    'B5': 'rededge1', 'B6': 'rededge2', 'B7': 'rededge3', 'B8': 'nir',
+    'B8A': 'nir2', 'B9': 'water_vapour', 'B11': 'swir1', 'B12': 'swir2',
+    'MSK_CLDPRB': 'pixel_qa', 'SCL': 'qa_class'
+}
 
 # TODO: Create an imagery directory
 #    :
@@ -169,8 +178,76 @@ class get_gee_data:
         ## compare number of elements
         if (len(dates_str_format) != len(set(dates_str_format))):
             dates_duplicated = [item for item, count in collections.Counter(dates_str_format).items() if count > 1]
-            dates_notduplicated =[item for item, count in collections.Counter(dates_str_format).items() if count == 1]
-        return [len(dates_str_format) != len(set(dates_str_format)), dates_duplicated,dates_notduplicated]
+            dates_noduplicate =[item for item, count in collections.Counter(dates_str_format).items() if count == 1]
+        else:
+            dates_noduplicate = dates_str_format
+        return [len(dates_str_format) != len(set(dates_str_format)), dates_duplicated,dates_noduplicate]
+
+    def l8_displacement(self, initdate = '2018-01-01', enddate ='2018-12-31'):
+
+        dfsum = self.summary.copy()
+        s2imgdatmin, s2imgdatmax, idl8 = l8_functions.getS2_comparable_image(dfsum, self.geometry)
+
+        newdateinit = initdate
+        newdateend = enddate
+        landsatimage = ee.Image(
+            self.image_collection.toList(self.image_collection.size()).get(ee.Number(int(idl8))))
+        landsatimage = landsatimage.clip(self._ee_sp)
+
+        if s2imgdatmax is not None:
+
+            gets2ref = get_gee_data(s2imgdatmin,
+                                    s2imgdatmax,
+                                    gis_functions.polygon_fromgeometry(self.geometry),
+                                    "sentinel2_sr",
+                                    cloud_percentage=80)
+
+            s2refimage = ee.Image(gets2ref.image_collection.first()).clip(self._ee_sp)
+
+            displacement = gee_functions.calculate_displacement(landsatimage.select('B5'), s2refimage.select('B8'))
+
+            pixelvalue = displacement.select('dx').hypot(displacement.select('dy')).reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=self._ee_sp,
+                scale=100
+            )
+            avgdisplacement = pixelvalue.get(ee.Image(displacement).bandNames().get(0)).getInfo()
+            if(avgdisplacement == 0):
+                s2imgdatmax = None
+
+        ## for those cases where it was not possible to find a sentinel surface reflectance image reference
+        ## the process is repeated but with a broadly query
+        while s2imgdatmax is None:
+            landsat2 = get_gee_data(newdateinit,
+                                                       newdateend,
+                                                       gis_functions.polygon_fromgeometry(self.geometry),
+                                                       "landsat8_t1sr",
+                                                       cloud_percentage=80)
+
+            dfsum = landsat2.summary.copy()
+            s2imgdatmin, s2imgdatmax, idl8 = l8_functions.getS2_comparable_image(dfsum, landsat2.geometry)
+
+            newdateinit = (landsat2.dates[0] + timedelta(days=360)).strftime("%Y-%m-%d")
+            newdateend = (landsat2.dates[0] + timedelta(days=720)).strftime("%Y-%m-%d")
+
+            landsatimage = ee.Image(
+                landsat2.image_collection.toList(landsat2.image_collection.size()).get(ee.Number(int(idl8))))
+            landsatimage = landsatimage.clip(self._ee_sp)
+
+        print('the S2 image reference was found in ' + s2imgdatmin)
+
+        gets2ref = get_gee_data(s2imgdatmin,
+                                                   s2imgdatmax,
+                                                   gis_functions.polygon_fromgeometry(self.geometry),
+                                                   "sentinel2_sr",
+                                                   cloud_percentage=80)
+        s2refimage = ee.Image(gets2ref.image_collection.first()).clip(self._ee_sp)
+
+        displacement = gee_functions.calculate_displacement(landsatimage.select('B5'), s2refimage.select('B8'))
+
+
+
+        return [displacement, s2refimage, landsatimage]
 
     def reduce_by_days(self, days):
 
@@ -269,7 +346,7 @@ class get_gee_data:
                                                                                              cloud_percentage)
             if remove_clouds is True:
                 self.image_collection = self.image_collection.map(
-                    lambda img: maskL8sr(img))
+                    lambda img: l8_functions.maskL8sr(img))
 
             if bands is not None:
                 self._bands = bands
@@ -442,33 +519,24 @@ def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):
 
 # def download_images(image_list):
 
-def maskL8sr(image):
-    # Bits 3 and 5 are cloud shadow and cloud, respectively.
-    cloudShadowBitMask = (1 << 3)
-    cloudsBitMask = (1 << 5)
-    # Get the pixel QA band.
-    qa = image.select('pixel_qa')
-    # Both flags should be set to zero, indicating clear conditions.
-    mask1 = qa.bitwiseAnd(ee.Number(cloudShadowBitMask)).eq(0) and qa.bitwiseAnd(cloudsBitMask).eq(0)
-    return image.mask(mask1.eq(1))
-
 
 def maskS2sr(image):
     # Bits 10 and 11 are clouds and cirrus, respectively.
     cloudBitMask = ee.Number(2).pow(10).int()
     cirrusBitMask = ee.Number(2).pow(11).int()
     qa = image.select('QA60')
-    mask0 = qa.bitwiseAnd(cloudBitMask).eq(0) and (qa.bitwiseAnd(cirrusBitMask).eq(0))
+    mask0 = qa.bitwiseAnd(cloudBitMask).eq(0)
+    mask1 = qa.bitwiseAnd(cirrusBitMask).eq(0)
     ## filtering using the scene layer classification
     scl = image.select('SCL')
     masknodata = scl.eq(0)
     maskshadow = scl.eq(3)
     maskclouds = scl.gte(8)
-    imageaftermask0 = ee.Image(image).mask(mask0.eq(1))
+    imageaftermask0 = ee.Image(image).updateMask(mask0)
     imageaftermaskshadow = imageaftermask0.mask(maskshadow.eq(0))
     imageafterclouds = imageaftermaskshadow.mask(maskclouds.eq(0))
 
-    return imageafterclouds.updateMask(masknodata.eq(0))
+    return imageafterclouds.updateMask(mask1)
 
 def merge_eeimages(eelist, bandnames):
 

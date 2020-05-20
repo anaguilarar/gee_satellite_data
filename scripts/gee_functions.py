@@ -2,8 +2,31 @@ import ee
 import json
 import geopandas as gpd
 import numpy as np
+from datetime import timedelta
 from scripts import gis_functions
 ee.Initialize()
+
+
+def calculate_displacement(eeimage, eeimageref, maxoffset=200, patchwidth=400):
+    refimageproj = eeimageref.reproject(crs=eeimage.projection())
+
+    displacement = eeimage.displacement(referenceImage=refimageproj,
+                                        maxOffset=maxoffset,
+                                        patchWidth=patchwidth)
+    return displacement
+
+def dates_maxcover(df, limit = 80, numdays = 20):
+    datasummary = df.loc[df.cover_percentage >= limit].reset_index()
+    datemin = datemax = None
+    if(datasummary.shape[0]>0):
+
+        datemaxcover = datasummary.dates.iloc[datasummary.cover_percentage.idxmax()]
+
+        datemin = (datemaxcover - timedelta(days=numdays)).strftime("%Y-%m-%d")
+        datemax = (datemaxcover + timedelta(days=numdays)).strftime("%Y-%m-%d")
+
+    return [datemin,
+            datemax]
 
 
 ### ee geometry
@@ -13,11 +36,12 @@ def geometry_as_ee(filename):
     if(type(filename) == str):
         sp_geometry = gpd.read_file(filename)
         ## reproject spatial data
-        if sp_geometry.crs['init'] != 'epsg:4326':
+        if sp_geometry.crs[[*sp_geometry.crs][0]] != 'epsg:4326':
             sp_geometry = sp_geometry.to_crs('epsg:4326')
 
     if type(filename) == gpd.geodataframe.GeoDataFrame:
         sp_geometry = filename
+
     ## get geometry points in json format
     jsonFormat = json.loads(sp_geometry.to_json())['features'][0]['geometry']
 
