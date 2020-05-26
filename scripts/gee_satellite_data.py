@@ -22,11 +22,11 @@ ee.Initialize()
 missions_bands = {
     'sentinel1': ['VV', 'VH'],
     'landsat8_t1sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11', 'sr_aerosol', 'pixel_qa', 'radsat_qa'],
-    'sentinel2_sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A','B9', 'B11', 'B12',
-                    'QA60', 'MSK_CLDPRB', "SCL"]
+    'sentinel2_sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12',
+                     'QA60', 'MSK_CLDPRB', "SCL"]
 }
 
-landsat_stdnames = {
+l8_stdnames = {
     'B1': 'coastal', 'B2': 'blue', 'B3': 'green', 'B4': 'red', 'B5': 'nir', 'B10': 'swir1', 'B11': 'swir2',
     'pixel_qa': 'pixel_qa', 'radsat_qa': 'qa_class'
 }
@@ -37,6 +37,7 @@ s2_stdnames = {
     'B8A': 'nir2', 'B9': 'water_vapour', 'B11': 'swir1', 'B12': 'swir2',
     'MSK_CLDPRB': 'pixel_qa', 'SCL': 'qa_class'
 }
+
 
 # TODO: Create an imagery directory
 #    :
@@ -98,7 +99,6 @@ class get_gee_data:
         return pd.Series(gee_functions.getfeature_fromeedict(self.image_collection.getInfo(),
                                                              'properties',
                                                              'orbitProperties_pass'))
-
     @property
     def length(self):
         return self.image_collection.size().getInfo()
@@ -169,6 +169,25 @@ class get_gee_data:
                                                                   gee_functions.get_eeimagecover_percentage(img,
                                                                                                             self._ee_sp)))
 
+    def add_vi_layer(self, vegetation_index="ndvi"):
+
+        currentbands = ee.Image(self.image_collection.first()).bandNames().getInfo()
+
+        if vegetation_index not in currentbands:
+            if self.mission == "sentinel2_sr":
+                std_names = [s2_stdnames[i] for i in self._bands]
+
+            if self.mission == "landsat8_t1sr":
+                std_names = [l8_stdnames[i] for i in self._bands]
+
+            self.image_collection = self.image_collection.map(lambda img:
+                                                              gee_functions.add_vegetation_index(img, vegetation_index,
+                                                                                                 self._bands, std_names)
+                                                              )
+        else:
+            print("{} was already computed, the current bands are {}".format(vegetation_index,currentbands))
+
+
     def check_duplicated_tiles(self):
 
         ## take the dates from filenames
@@ -178,12 +197,12 @@ class get_gee_data:
         ## compare number of elements
         if (len(dates_str_format) != len(set(dates_str_format))):
             dates_duplicated = [item for item, count in collections.Counter(dates_str_format).items() if count > 1]
-            dates_noduplicate =[item for item, count in collections.Counter(dates_str_format).items() if count == 1]
+            dates_noduplicate = [item for item, count in collections.Counter(dates_str_format).items() if count == 1]
         else:
             dates_noduplicate = dates_str_format
-        return [len(dates_str_format) != len(set(dates_str_format)), dates_duplicated,dates_noduplicate]
+        return [len(dates_str_format) != len(set(dates_str_format)), dates_duplicated, dates_noduplicate]
 
-    def l8_displacement(self, initdate = '2018-01-01', enddate ='2018-12-31'):
+    def l8_displacement(self, initdate='2018-01-01', enddate='2018-12-31'):
 
         dfsum = self.summary.copy()
         s2imgdatmin, s2imgdatmax, idl8 = l8_functions.getS2_comparable_image(dfsum, self.geometry)
@@ -212,17 +231,17 @@ class get_gee_data:
                 scale=100
             )
             avgdisplacement = pixelvalue.get(ee.Image(displacement).bandNames().get(0)).getInfo()
-            if(avgdisplacement == 0):
+            if (avgdisplacement == 0):
                 s2imgdatmax = None
 
         ## for those cases where it was not possible to find a sentinel surface reflectance image reference
         ## the process is repeated but with a broadly query
         while s2imgdatmax is None:
             landsat2 = get_gee_data(newdateinit,
-                                                       newdateend,
-                                                       gis_functions.polygon_fromgeometry(self.geometry),
-                                                       "landsat8_t1sr",
-                                                       cloud_percentage=80)
+                                    newdateend,
+                                    gis_functions.polygon_fromgeometry(self.geometry),
+                                    "landsat8_t1sr",
+                                    cloud_percentage=80)
 
             dfsum = landsat2.summary.copy()
             s2imgdatmin, s2imgdatmax, idl8 = l8_functions.getS2_comparable_image(dfsum, landsat2.geometry)
@@ -237,15 +256,13 @@ class get_gee_data:
         print('the S2 image reference was found in ' + s2imgdatmin)
 
         gets2ref = get_gee_data(s2imgdatmin,
-                                                   s2imgdatmax,
-                                                   gis_functions.polygon_fromgeometry(self.geometry),
-                                                   "sentinel2_sr",
-                                                   cloud_percentage=80)
+                                s2imgdatmax,
+                                gis_functions.polygon_fromgeometry(self.geometry),
+                                "sentinel2_sr",
+                                cloud_percentage=80)
         s2refimage = ee.Image(gets2ref.image_collection.first()).clip(self._ee_sp)
 
         displacement = gee_functions.calculate_displacement(landsatimage.select('B5'), s2refimage.select('B8'))
-
-
 
         return [displacement, s2refimage, landsatimage]
 
@@ -271,7 +288,7 @@ class get_gee_data:
             ## get indexes from summary
             indexesdup = list(self.summary.loc[self.summary.dates.apply(
                 lambda x: x.strftime("%Y%m%d")) ==
-                                                   self._checkmultyple_tiles[1][dateindex]].index)
+                                               self._checkmultyple_tiles[1][dateindex]].index)
 
             imageslist = []
 
@@ -288,19 +305,28 @@ class get_gee_data:
 
             ## set properties
             datetoimage = datetime.datetime.timestamp(
-                datetime.datetime.strptime(str(self._checkmultyple_tiles[1][dateindex]), '%Y%m%d'))*1000
+                datetime.datetime.strptime(str(self._checkmultyple_tiles[1][dateindex]), '%Y%m%d')) * 1000
             reducedimages.append(imagereduced.set('system:time_start', ee.Number(datetoimage)))
 
         for dateindex in range(len(self._checkmultyple_tiles[2])):
             indexesdup = list(self.summary.loc[self.summary.dates.apply(
                 lambda x: x.strftime("%Y%m%d")) ==
-                                                   self._checkmultyple_tiles[2][dateindex]].index)
+                                               self._checkmultyple_tiles[2][dateindex]].index)
 
             reducedimages.append(self.image_collection.toList(self.image_collection.size()).get(indexesdup[0]))
 
         imagecollection = ee.ImageCollection(ee.List(reducedimages)).sort('system:time_start')
         return imagecollection
-        
+
+    def displace_landsatcollection(self, displacement=None):
+
+        if displacement is not None:
+            self.image_collection = self.image_collection.map(lambda img:
+                                                              img.displace(displacement))
+            print("the image collection was resgistered")
+
+        else:
+            print("you must provide an ee image displacement reference first")
 
     def __init__(self, start_date,
                  end_date,
@@ -355,9 +381,9 @@ class get_gee_data:
                     image.resample('bilinear')
                 )
 
-
         if mission == "sentinel2_sr":
-            self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUDY_PIXEL_PERCENTAGE', 'less_than',
+            self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUDY_PIXEL_PERCENTAGE',
+                                                                                             'less_than',
                                                                                              cloud_percentage)
             if remove_clouds is True:
                 self.image_collection = self.image_collection.map(
@@ -365,7 +391,6 @@ class get_gee_data:
 
             if bands is not None:
                 self._bands = bands
-
 
         self._set_coverpercentageasproperty()
 
@@ -388,11 +413,6 @@ class get_gee_data:
 #    edge = ee.Image(image).lt(-30.0)
 #    maskedImage = ee.Image(image).mask().and(edge.not())
 #    return image.updateMask(maskedImage)
-
-
-def add_normalized_vegetation_indexes(image, bands, viname):
-    return image.addBands(
-        image.normalizedDifference([bands[0], bands[1]]).rename(viname))
 
 
 def get_imageprperties(filename, outputfolder, scale):
@@ -538,10 +558,7 @@ def maskS2sr(image):
 
     return imageafterclouds.updateMask(mask1)
 
-def merge_eeimages(eelist, bandnames):
 
+def merge_eeimages(eelist, bandnames):
     meannames = [i + "_mean" for i in bandnames]
     return ee.ImageCollection(eelist).reduce(ee.Reducer.mean()).select(meannames, bandnames)
-
-
-

@@ -4,7 +4,24 @@ import geopandas as gpd
 import numpy as np
 from datetime import timedelta
 from scripts import gis_functions
+
 ee.Initialize()
+
+def add_vegetation_index(image, vi_name, img_bandnames= None, std_names = None):
+
+    img_copy = image.select(img_bandnames, std_names)
+
+    if vi_name == "ndvi":
+        equation = '(NIR - RED)/(NIR + RED)'
+        kwargs = {'RED': img_copy.select('red'),
+                  'NIR': img_copy.select('nir')}
+
+    if vi_name == "gndvi":
+        equation = '(NIR - GREEN)/(NIR + GREEN)'
+        kwargs = {'NIR': img_copy.select('nir'),
+                  'GREEN': img_copy.select('green')}
+
+    return image.addBands(img_copy.expression(equation, kwargs).rename(vi_name))
 
 
 def calculate_displacement(eeimage, eeimageref, maxoffset=200, patchwidth=400):
