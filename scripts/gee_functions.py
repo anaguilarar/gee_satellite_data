@@ -7,9 +7,11 @@ from scripts import gis_functions
 
 ee.Initialize()
 
-def add_vegetation_index(image, vi_name, img_bandnames= None, std_names = None):
 
+def add_vegetation_index(image, vi_name, img_bandnames=None,
+                         std_names=None, equation=None):
     img_copy = image.select(img_bandnames, std_names)
+    kwargs = None
 
     if vi_name == "ndvi":
         equation = '(NIR - RED)/(NIR + RED)'
@@ -20,6 +22,11 @@ def add_vegetation_index(image, vi_name, img_bandnames= None, std_names = None):
         equation = '(NIR - GREEN)/(NIR + GREEN)'
         kwargs = {'NIR': img_copy.select('nir'),
                   'GREEN': img_copy.select('green')}
+
+    if vi_name == "lswi":
+        equation = '(NIR - SWIR1)/(NIR + SWIR1)'
+        kwargs = {'NIR': img_copy.select('nir'),
+                  'SWIR1': img_copy.select('swir1')}
 
     return image.addBands(img_copy.expression(equation, kwargs).rename(vi_name))
 
@@ -32,11 +39,11 @@ def calculate_displacement(eeimage, eeimageref, maxoffset=200, patchwidth=400):
                                         patchWidth=patchwidth)
     return displacement
 
-def dates_maxcover(df, limit = 80, numdays = 20):
+
+def dates_maxcover(df, limit=80, numdays=20):
     datasummary = df.loc[df.cover_percentage >= limit].reset_index()
     datemin = datemax = None
-    if(datasummary.shape[0]>0):
-
+    if (datasummary.shape[0] > 0):
         datemaxcover = datasummary.dates.iloc[datasummary.cover_percentage.idxmax()]
 
         datemin = (datemaxcover - timedelta(days=numdays)).strftime("%Y-%m-%d")
@@ -46,11 +53,22 @@ def dates_maxcover(df, limit = 80, numdays = 20):
             datemax]
 
 
+def date_listperdays(imgcollection, ndays):
+    days = ee.List.sequence(0, ee.Date(ee.Image(imgcollection.sort('system:time_start', False)
+                                                .first()).get('system:time_start'))
+                            .difference(ee.Date(ee.Image(imgcollection.first())
+                                                .get('system:time_start')), 'day'), ndays).map(
+        lambda x: ee.Date(ee.Image(imgcollection.first())
+                          .get('system:time_start')).advance(x, "day"))
+
+    return days.slice(0, -1).zip(days.slice(1))
+
+
 ### ee geometry
 def geometry_as_ee(filename):
-    '''transform shapefile format to ee geometry'''
+    """transform shapefile format to ee geometry"""
     ### read csv file
-    if(type(filename) == str):
+    if (type(filename) == str):
         sp_geometry = gpd.read_file(filename)
         ## reproject spatial data
         if sp_geometry.crs[[*sp_geometry.crs][0]] != 'epsg:4326':
@@ -66,10 +84,9 @@ def geometry_as_ee(filename):
 
 
 def getfeature_fromeedict(eecollection, attribute, featname):
-    '''get image collection properties'''
+    """get image collection properties"""
     aux = []
     for feature in range(len(eecollection['features'])):
-
         ## get data from the dictionary
         datadict = eecollection['features'][feature][attribute][featname]
         ## check if it has info
@@ -85,7 +102,7 @@ def get_eeimagecover_percentage(eeimage, eegeometry):
     pixelareavalue = imagewithdata.multiply(area).reduceRegion(
         reducer=ee.Reducer.sum(),
         geometry=eegeometry,
-        scale=30
+        scale=100
     )
 
     ### calculate percentage using the geometry
@@ -119,7 +136,7 @@ def get_eeurl(imagecollection, geometry, scale=10):
 
 
 def query_image_collection(initdate, enddate, satellite_mission, ee_sp):
-    '''mission data query'''
+    """mission data query"""
 
     ## mission data query
     return ee.ImageCollection(satellite_mission).filterDate(initdate, enddate).filterBounds(ee_sp)
@@ -134,3 +151,15 @@ def LatLonImg(img, geometry, scale):
     lats = np.array((ee.Array(img.get("latitude")).getInfo()))
     lons = np.array((ee.Array(img.get("longitude")).getInfo()))
     return lats, lons, data
+
+
+def select_imagesfromcollection(image_collection, indexes):
+    """Reduce image collection using indexes as reference"""
+
+    eelistimages = image_collection.toList(image_collection.size())
+    imageslist = []
+
+    for eeimageindex in indexes:
+        imageslist.append(eelistimages.get(int(eeimageindex)))
+
+    return ee.ImageCollection(ee.List(imageslist))

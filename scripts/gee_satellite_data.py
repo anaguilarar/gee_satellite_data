@@ -5,12 +5,13 @@ import os
 import wget
 import pandas as pd
 import numpy as np
+import shutil
 import warnings
 import folium
 import geehydro
 
 from datetime import timedelta
-from scripts import gee_functions
+from scripts import gee_functions, s2_functions
 from scripts import gis_functions
 from scripts import general_functions
 from scripts import l8_functions
@@ -35,12 +36,13 @@ s2_stdnames = {
     'B1': 'coastal', 'B2': 'blue', 'B3': 'green', 'B4': 'red',
     'B5': 'rededge1', 'B6': 'rededge2', 'B7': 'rededge3', 'B8': 'nir',
     'B8A': 'nir2', 'B9': 'water_vapour', 'B11': 'swir1', 'B12': 'swir2',
-    'MSK_CLDPRB': 'pixel_qa', 'SCL': 'qa_class'
+    'MSK_CLDPRB': 'pixel_qa', 'SCL': 'qa_class', 'QA60': 'pixel_qa_2'
 }
 
 
-# TODO: Create an imagery directory
-#    :
+### TODO: Create an imagery directory
+### TODO: DOWNLOAD DATA AS XARRAY
+### TODO: DOWNLOAD DATA AS TIF
 
 
 class get_gee_data:
@@ -99,6 +101,7 @@ class get_gee_data:
         return pd.Series(gee_functions.getfeature_fromeedict(self.image_collection.getInfo(),
                                                              'properties',
                                                              'orbitProperties_pass'))
+
     @property
     def length(self):
         return self.image_collection.size().getInfo()
@@ -124,7 +127,7 @@ class get_gee_data:
         return coverareas
 
     def _get_dates_afterreduction(self, days):
-        dates = date_listperdays(self.image_collection, days)
+        dates = gee_functions.date_listperdays(self.image_collection, days)
 
         refdates = [datetime.datetime.timestamp(datetime.datetime.strptime(str(x), '%Y-%m-%d %H:%M:%S'))
                     for x in self.dates]
@@ -185,8 +188,7 @@ class get_gee_data:
                                                                                                  self._bands, std_names)
                                                               )
         else:
-            print("{} was already computed, the current bands are {}".format(vegetation_index,currentbands))
-
+            print("{} was already computed, the current bands are {}".format(vegetation_index, currentbands))
 
     def check_duplicated_tiles(self):
 
@@ -228,7 +230,7 @@ class get_gee_data:
             pixelvalue = displacement.select('dx').hypot(displacement.select('dy')).reduceRegion(
                 reducer=ee.Reducer.mean(),
                 geometry=self._ee_sp,
-                scale=100
+                scale=1000
             )
             avgdisplacement = pixelvalue.get(ee.Image(displacement).bandNames().get(0)).getInfo()
             if (avgdisplacement == 0):
@@ -286,7 +288,7 @@ class get_gee_data:
         reducedimages = []
         for dateindex in range(len(self._checkmultyple_tiles[1])):
             ## get indexes from summary
-            indexesdup = list(self.summary.loc[self.summary.dates.apply(
+            indexesdup = list(self.dates.loc[self.dates.apply(
                 lambda x: x.strftime("%Y%m%d")) ==
                                                self._checkmultyple_tiles[1][dateindex]].index)
 
@@ -309,7 +311,7 @@ class get_gee_data:
             reducedimages.append(imagereduced.set('system:time_start', ee.Number(datetoimage)))
 
         for dateindex in range(len(self._checkmultyple_tiles[2])):
-            indexesdup = list(self.summary.loc[self.summary.dates.apply(
+            indexesdup = list(self.dates.loc[self.dates.apply(
                 lambda x: x.strftime("%Y%m%d")) ==
                                                self._checkmultyple_tiles[2][dateindex]].index)
 
@@ -387,17 +389,16 @@ class get_gee_data:
                                                                                              cloud_percentage)
             if remove_clouds is True:
                 self.image_collection = self.image_collection.map(
-                    lambda img: maskS2sr(img))
+                    lambda img: s2_functions.maskS2sr(img))
 
             if bands is not None:
                 self._bands = bands
 
-        self._set_coverpercentageasproperty()
-
         self._checkmultyple_tiles = self.check_duplicated_tiles()
         if self._checkmultyple_tiles[0] == True and (mission == "sentinel2_sr" or mission == "landsat8_t1sr"):
             self.image_collection = self.reduce_duplicatedates()
-            self._set_coverpercentageasproperty()
+
+        self._set_coverpercentageasproperty()
 
     @orbit.setter
     def orbit(self, value):
@@ -414,37 +415,14 @@ class get_gee_data:
 #    maskedImage = ee.Image(image).mask().and(edge.not())
 #    return image.updateMask(maskedImage)
 
-
-def get_imageprperties(filename, outputfolder, scale):
-    datestr = filename[filename.index('_20') + 1:filename.index('_20') + 9]
-    prefixgee = filename[len(outputfolder) + 1:filename.index('_20')]
-    regionid = filename[filename.index(datestr) + 9:filename.index(str(scale) + 'm') - 1]
-    return [prefixgee, datestr, regionid]
-
-
-def s1_imagesunzip(zipfilename, outputfolder, imgbands, scale):
-    filenamesunzipped = general_functions.unzip_files(zipfilename + '.zip', outputfolder)
-    imgargs = get_imageprperties(zipfilename, outputfolder, scale)
-    for bandsindex in range(len(imgbands)):
-
-        filesperband = np.array([x for x in filenamesunzipped if imgbands[bandsindex] in x])
-        suffixraster = [x[x.index(imgbands[bandsindex] + '.') + len(imgbands[bandsindex]):] for x in filesperband]
-
-        newnames_perband = []
-        for i in range(len(suffixraster)):
-            newnames_perband.append(os.path.join(outputfolder,
-                                                 '{}_{}_{}_{}_{}m{}'
-                                                 .format(imgargs[0], imgbands[bandsindex], imgargs[1], imgargs[2],
-                                                         str(scale), suffixraster[i])))
-
-        for j, i in zip(filesperband, newnames_perband):
-            os.rename(os.path.join(outputfolder, j), i)
-
-    os.remove(zipfilename + '.zip')
-
-
-def download_gee_tolocal(geedata_class, outputfolder, regionid="", scale=10):
+def download_gee_tolocal(geedata_class, outputfolder, regionid="",
+                         scale=10, bands=None, cover_percentage=None):
     if isinstance(geedata_class, get_gee_data):
+
+        ## check the folder existence
+        if os.path.exists(outputfolder) is False:
+            os.mkdir(outputfolder)
+            print('the {} was created'.format(outputfolder))
 
         if geedata_class._imagreducedbydays is None:
             imgcollection = geedata_class.image_collection
@@ -453,13 +431,25 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="", scale=10):
             imgcollection = geedata_class._imagreducedbydays
             dates = geedata_class._dates_reduced
 
+        collsummary = geedata_class.summary.copy()
+        if bands is not None:
+            imgcollection = imgcollection.select(bands)
+        else:
+            bands = geedata_class._bands
+
+        if cover_percentage is not None:
+            listofindexes = collsummary.loc[collsummary.cover_percentage > cover_percentage].index.values
+            dates = dates.loc[collsummary.cover_percentage > cover_percentage]
+            imgcollection = gee_functions.select_imagesfromcollection(imgcollection, listofindexes)
+
         ## get urls list from gee
         urls_list = gee_functions.get_eeurl(imgcollection, geedata_class._ee_sp['coordinates'], scale)
 
         ## change dates format
 
-        dates_str = [datetime.datetime.strptime(str(dates[i]), '%Y-%m-%d %H:%M:%S').strftime("%Y%m%d") for i in
-                     range(len(dates))]
+        # dates_str = [datetime.datetime.strptime(str(dates[i]), '%Y-%m-%d %H:%M:%S').strftime("%Y%m%d") for i in
+        #             range(len(dates))]
+        dates_str = general_functions.to_stringdates(dates)
 
         ## donwload each image
 
@@ -470,16 +460,17 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="", scale=10):
             wget.download(url, filename + '.zip')
             print('the {} file was downloaded'.format(filename))
 
-        if geedata_class.mission == 'sentinel1':
-            wrongfiles = []
-            for zipfilepath in filenames:
+        wrongfiles = []
+        # if geedata_class.mission == 'sentinel1':
 
-                try:
-                    s1_imagesunzip(zipfilepath, outputfolder, geedata_class._bands, scale)
-                except:
-                    wrongfiles.append(wrongfiles)
+        for zipfilepath in filenames:
 
-        print('these files created a conflict at the moment of its download')
+            try:
+                general_functions.unzip_geeimages(zipfilepath, outputfolder, bands, scale)
+            except:
+                wrongfiles.append(zipfilepath)
+
+        print('these {} files created a conflict at the moment of its download'.format(wrongfiles))
 
 
 
@@ -496,19 +487,8 @@ def reduce_meanimagesbydates(satcollection, date_init, date_end):
     return outputimage
 
 
-def date_listperdays(imgcollection, ndays):
-    days = ee.List.sequence(0, ee.Date(ee.Image(imgcollection.sort('system:time_start', False)
-                                                .first()).get('system:time_start'))
-                            .difference(ee.Date(ee.Image(imgcollection.first())
-                                                .get('system:time_start')), 'day'), ndays).map(
-        lambda x: ee.Date(ee.Image(imgcollection.first())
-                          .get('system:time_start')).advance(x, "day"))
-
-    return days.slice(0, -1).zip(days.slice(1))
-
-
 def reduce_imgs_by_days(image_collection, days):
-    dates = date_listperdays(image_collection, days)
+    dates = gee_functions.date_listperdays(image_collection, days)
     datelist = ee.List.sequence(0, ee.Number(dates.size().subtract(ee.Number(1))))
     return datelist.map(lambda n:
                         reduce_meanimagesbydates(image_collection,
@@ -538,25 +518,6 @@ def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):
 
 
 # def download_images(image_list):
-
-
-def maskS2sr(image):
-    # Bits 10 and 11 are clouds and cirrus, respectively.
-    cloudBitMask = ee.Number(2).pow(10).int()
-    cirrusBitMask = ee.Number(2).pow(11).int()
-    qa = image.select('QA60')
-    mask0 = qa.bitwiseAnd(cloudBitMask).eq(0)
-    mask1 = qa.bitwiseAnd(cirrusBitMask).eq(0)
-    ## filtering using the scene layer classification
-    scl = image.select('SCL')
-    masknodata = scl.eq(0)
-    maskshadow = scl.eq(3)
-    maskclouds = scl.gte(8)
-    imageaftermask0 = ee.Image(image).updateMask(mask0)
-    imageaftermaskshadow = imageaftermask0.mask(maskshadow.eq(0))
-    imageafterclouds = imageaftermaskshadow.mask(maskclouds.eq(0))
-
-    return imageafterclouds.updateMask(mask1)
 
 
 def merge_eeimages(eelist, bandnames):
