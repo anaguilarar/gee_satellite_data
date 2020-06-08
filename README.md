@@ -10,6 +10,7 @@ The code uses google earth engine API, for that reason, it is advisable to follo
 * Python Version >= 3.6
 
 * Modules:
+    *   earthengine-api 0.1.211
     *   pyproj > 2.6.1
     *   pandas 
     *   geopandas 0.7.0 
