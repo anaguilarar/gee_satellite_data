@@ -22,4 +22,4 @@ The code uses google earth engine API, for that reason, it is advisable to follo
 
 ## how to use?
 
-Please refers to the jupyter notebook example Download Satellite Data or likewise 
+Please refers to the jupyter notebook example Download Satellite Data. 
