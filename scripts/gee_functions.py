@@ -71,8 +71,13 @@ def geometry_as_ee(filename):
     if (type(filename) == str):
         sp_geometry = gpd.read_file(filename)
         ## reproject spatial data
-        if sp_geometry.crs[[*sp_geometry.crs][0]] != 'epsg:4326':
-            sp_geometry = sp_geometry.to_crs('epsg:4326')
+        if str(gpd.__version__) == "0.6.2":
+            if sp_geometry.crs[[*sp_geometry.crs][0]] != 'epsg:4326':
+                sp_geometry = sp_geometry.to_crs('epsg:4326')
+        #
+        else:
+            if sp_geometry.crs != 'epsg:4326':
+                sp_geometry = sp_geometry.to_crs('epsg:4326')
 
     if type(filename) == gpd.geodataframe.GeoDataFrame:
         sp_geometry = filename
