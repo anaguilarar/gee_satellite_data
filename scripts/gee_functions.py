@@ -120,6 +120,7 @@ def get_eeimagecover_percentage(eeimage, eegeometry):
 
 
 def get_eeurl(imagecollection, geometry, scale=10):
+    """get url for an individual image"""
     imagesurls = []
 
     listimages = imagecollection.toList(imagecollection.size());
@@ -156,6 +157,23 @@ def LatLonImg(img, geometry, scale):
     lats = np.array((ee.Array(img.get("latitude")).getInfo()))
     lons = np.array((ee.Array(img.get("longitude")).getInfo()))
     return lats, lons, data
+
+
+def reduce_meanimagesbydates(satcollection, date_init, date_end):
+    # imagesfiltered = ee.ImageCollection(satcollection.filterDate(date_init, date_end))
+
+    # datefirst_image = ee.Number(ee.Image(satcollection.filterDate(date_init, date_end).first().get('system:time_start')))
+    outputimage = ee.Image(satcollection.filterDate(date_init, date_end).mean())
+
+    return outputimage
+
+def reduce_imgs_by_days(image_collection, days):
+    dates = date_listperdays(image_collection, days)
+    datelist = ee.List.sequence(0, ee.Number(dates.size().subtract(ee.Number(1))))
+    return datelist.map(lambda n:
+                        reduce_meanimagesbydates(image_collection,
+                                                 ee.List(dates.get(ee.Number(n))).get(0),
+                                                 ee.List(dates.get(ee.Number(n))).get(1)))
 
 
 def select_imagesfromcollection(image_collection, indexes):

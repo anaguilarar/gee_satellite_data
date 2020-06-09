@@ -78,7 +78,7 @@ class get_gee_data:
 
            Attributes
            ----------
-           products : dict
+           dates : dict
                Filtered copy of `product_list` passed to the object containing only
                products generated between `start_date` and `end_date`.
            product_boundaries : dict
@@ -268,11 +268,20 @@ class get_gee_data:
 
         return [displacement, s2refimage, landsatimage]
 
-    def reduce_by_days(self, days):
+    def reduce_collection_by_days(self, days):
+        """Reduce a collection based on a time window.
+        Args:
+          params: An object containing request parameters with the
+              following possible values:
+                  days (integer) size of the time window in days
+
+        Returns:
+          image_collection reduced by a time window where their dates and images are the average.
+        """
 
         ## remove those elements with null data
         self._imagreducedbydays = ee.ImageCollection(
-            reduce_imgs_by_days(self.image_collection, days)).map(lambda image:
+            gee_functions.reduce_imgs_by_days(self.image_collection, days)).map(lambda image:
                                                                   image.set(
                                                                       'count',
                                                                       ee.Image(
@@ -282,7 +291,20 @@ class get_gee_data:
                                                          img.divide(10).multiply(10)
                                                          )
         self._dates_reduced = self._get_dates_afterreduction(days)
-        return self._imagreducedbydays
+
+        ## set new dates as a property
+        imgcolllist = self._imagreducedbydays.toList(self._imagreducedbydays.size())
+        reducedimages = []
+        for dateindex in range(len(self._dates_reduced)):
+            img = imgcolllist.get(ee.Number(int(dateindex)))
+
+            datetoimage = datetime.datetime.timestamp(
+                datetime.datetime.strptime(str(self._dates_reduced[dateindex])[:10], '%Y-%m-%d')) * 1000
+
+            reducedimages.append(ee.Image(img).set('system:time_start', ee.Number(datetoimage)))
+
+        self.image_collection = ee.ImageCollection(ee.List(reducedimages)).sort('system:time_start')
+        self._set_coverpercentageasproperty()
 
     def reduce_duplicatedates(self):
         reducedimages = []
@@ -368,6 +390,7 @@ class get_gee_data:
                 ).filter(
                     ee.Filter.listContains('transmitterReceiverPolarisation', band)
                 )
+            self.image_collection = self.image_collection.select(self._bands)
 
         if mission == "landsat8_t1sr":
             self.image_collection = self.image_collection.select(self._bands).filterMetadata('CLOUD_COVER', 'less_than',
@@ -417,6 +440,22 @@ class get_gee_data:
 
 def download_gee_tolocal(geedata_class, outputfolder, regionid="",
                          scale=10, bands=None, cover_percentage=None):
+
+    """Download gee satellite collection to local storage.
+    Args:
+      params: An object containing request parameters with the
+          following possible values:
+              geedata_class (get_gee_data) the gee class that contains all gee data.
+              outputfolder (string) the path in which will be stored the data.
+              regionid (string) an id for images identification
+              scale (integer) the spatial resolution, 10 is the default number
+              bands (list) a list with the bands that will be selected. None is the dafault
+              cover_percentage (integer) a limit for coverage
+
+    Returns:
+      None.
+    """
+
     if isinstance(geedata_class, get_gee_data):
 
         ## check the folder existence
@@ -424,12 +463,15 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
             os.mkdir(outputfolder)
             print('the {} was created'.format(outputfolder))
 
-        if geedata_class._imagreducedbydays is None:
-            imgcollection = geedata_class.image_collection
-            dates = geedata_class.dates
-        else:
-            imgcollection = geedata_class._imagreducedbydays
-            dates = geedata_class._dates_reduced
+#        if geedata_class._imagreducedbydays is None:
+#            imgcollection = geedata_class.image_collection
+#            dates = geedata_class.dates
+        #else:
+        #    imgcollection = geedata_class._imagreducedbydays
+        #    dates = geedata_class._dates_reduced
+
+        imgcollection = geedata_class.image_collection
+        dates = geedata_class.dates
 
         collsummary = geedata_class.summary.copy()
         if bands is not None:
@@ -456,44 +498,23 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
         filenames = [os.path.join(outputfolder,
                                   ('{}_{}_{}_{}m').format(geedata_class._prefix, dates_str[i], regionid, str(scale)))
                      for i in range(len(dates_str))]
-        for url, filename in zip(urls_list, filenames):
-            wget.download(url, filename + '.zip')
-            print('the {} file was downloaded'.format(filename))
-
         wrongfiles = []
-        # if geedata_class.mission == 'sentinel1':
-
-        for zipfilepath in filenames:
-
+        for url, filename in zip(urls_list, filenames):
             try:
-                general_functions.unzip_geeimages(zipfilepath, outputfolder, bands, scale)
-            except:
-                wrongfiles.append(zipfilepath)
+                wget.download(url, filename + '.zip')
+                general_functions.unzip_geeimages(filename, outputfolder, bands, scale)
+                print('the {} file was downloaded'.format(filename))
 
-        print('these {} files created a conflict at the moment of its download'.format(wrongfiles))
+            except:
+                wrongfiles.append(filename)
+
+        if len(wrongfiles)>0:
+            print('these {} files created a conflict at the moment of its download'.format(wrongfiles))
 
 
 
     else:
         print("the input file must be a get_gee_data class")
-
-
-def reduce_meanimagesbydates(satcollection, date_init, date_end):
-    # imagesfiltered = ee.ImageCollection(satcollection.filterDate(date_init, date_end))
-
-    # datefirst_image = ee.Number(ee.Image(satcollection.filterDate(date_init, date_end).first().get('system:time_start')))
-    outputimage = ee.Image(satcollection.filterDate(date_init, date_end).mean())
-
-    return outputimage
-
-
-def reduce_imgs_by_days(image_collection, days):
-    dates = gee_functions.date_listperdays(image_collection, days)
-    datelist = ee.List.sequence(0, ee.Number(dates.size().subtract(ee.Number(1))))
-    return datelist.map(lambda n:
-                        reduce_meanimagesbydates(image_collection,
-                                                 ee.List(dates.get(ee.Number(n))).get(0),
-                                                 ee.List(dates.get(ee.Number(n))).get(1)))
 
 
 def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):

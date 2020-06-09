@@ -16,6 +16,17 @@ def geometry_center(geometry):
 
 
 def polygon_fromgeometry(geometry, crs='epsg:4326'):
+    """Get a polygon feature from geometry points.
+    Args:
+      params: An object containing request parameters with the
+          following possible values:
+              geometry (list) The geomtry points
+              crs (string) the coordinates system code
+
+    Returns:
+      The list call results.
+    """
+
     polygon_geom = Polygon(geometry)
 
     # crs = {'init': crs}
