@@ -1,0 +1,13 @@
+# Config file for automatic testing at travis-ci.org
+
+language: python
+
+matrix:
+  include:
+    - python: 3.6
+    - python: 3.7
+    - python: 3.8
+    
+install: 
+  - conda install -c conda-forge requirements.txt  
+
