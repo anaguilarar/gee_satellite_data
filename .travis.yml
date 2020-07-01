@@ -9,5 +9,16 @@ matrix:
     - python: 3.8
     
 install: 
-  - conda install -c conda-forge requirements.txt  
+  - conda install -c conda-forge earthengine-api
+  - conda install -c conda-forge pandas
+  - conda isntall -c conda-forge geopandas
+  - pip install pyproj=="2.6.1.post1"
+  - conda isntall -c conda-forge numpy
+  - conda isntall -c conda-forge geehydro
+  - conda isntall -c conda-forge wget
+  - conda isntall -c conda-forge json
+  
+  
+
+
 
