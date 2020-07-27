@@ -354,18 +354,26 @@ class get_gee_data:
 
     def __init__(self, start_date,
                  end_date,
-                 roi_filename,
-                 mission,
+                 roi_filename=None,
+                 mission=None,
+                 point_coordinates=None,
                  bands=None,
                  cloud_percentage=100,
-                 remove_clouds=True):
+                 remove_clouds=True,
+                 buffer=50):
 
         ### set initial properties
         self.mission = mission
 
         self._dates = [start_date, end_date]
         ## get spatial points
-        self._ee_sp = gee_functions.geometry_as_ee(roi_filename)
+        if roi_filename is not None:
+            self._ee_sp = gee_functions.geometry_as_ee(roi_filename)
+        ## setting a single point as geometry
+        if point_coordinates is not None:
+            if len(point_coordinates) == 2:
+                self._ee_sp = gee_functions.coords_togeepoint(point_coordinates, buffer)
+
 
         self._bands = missions_bands[mission]
 

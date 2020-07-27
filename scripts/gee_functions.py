@@ -186,3 +186,10 @@ def select_imagesfromcollection(image_collection, indexes):
         imageslist.append(eelistimages.get(int(eeimageindex)))
 
     return ee.ImageCollection(ee.List(imageslist))
+
+
+def coords_togeepoint(point_coordinates, buffer):
+    """transforming from was84 coordnates to gee points"""
+    return ee.Geometry.Point(point_coordinates[0], point_coordinates[1]).buffer(buffer);
+
+    return None
