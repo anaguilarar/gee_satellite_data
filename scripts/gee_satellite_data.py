@@ -364,7 +364,7 @@ class get_gee_data:
 
         ### set initial properties
         self.mission = mission
-
+        self._querypoint = np.nan
         self._dates = [start_date, end_date]
         ## get spatial points
         if roi_filename is not None:
@@ -373,6 +373,7 @@ class get_gee_data:
         if point_coordinates is not None:
             if len(point_coordinates) == 2:
                 self._ee_sp = gee_functions.coords_togeepoint(point_coordinates, buffer)
+                self._querypoint = point_coordinates
 
 
         self._bands = missions_bands[mission]
