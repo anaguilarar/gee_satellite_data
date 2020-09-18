@@ -1,16 +1,13 @@
 from scripts import gee_functions
 import plotly.graph_objects as go
-
+from scripts import gee_functions
+from scripts import gis_functions
+import folium
+import ee
 
 def plot_vi_time_series(gee_satellite_class, vi_name):
-    ee_point = gee_functions.coords_togeepoint(gee_satellite_class._querypoint, 100)
 
-    meanDictionary = gee_satellite_class.image_collection.map(lambda img:
-                                       gee_functions.reduce_tosingle_columns(img.select([vi_name]),
-                                                                             ee_point)).flatten()
-
-    ndvi_data = gee_functions.fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
-    ndvi_data.columns = ['date', vi_name]
+    ndvi_data = gee_functions.get_band_timeseries_summary(gee_satellite_class, vi_name)
 
     fig = go.Figure(data=go.Scatter(x=ndvi_data.date, y=ndvi_data[vi_name]))
 
@@ -59,3 +56,30 @@ def plot_vi_time_series(gee_satellite_class, vi_name):
     )
 
     fig.show()
+
+def plot_multiple_eeimage(imagestoplot, visparameters=None, geometry=None, images_labes = None,zoom=9.5):
+    ##
+    ## get the map center coordinates from the geometry
+    centergeometry = gis_functions.geometry_center(geometry)
+    Map = folium.Map(location=[centergeometry[1],
+                               centergeometry[0]], zoom_start=zoom)
+    for i in range(len(imagestoplot)):
+        if visparameters is not None:
+            if images_labes is not None:
+                Map.addLayer(ee.Image(imagestoplot[i]), visparameters[i], images_labes[i])
+            else:
+                Map.addLayer(ee.Image(imagestoplot[i]), visparameters[i], 'gee_image_'+str(i+1))
+        else:
+            if images_labes is not None:
+                Map.addLayer(ee.Image(imagestoplot[i]), {}, images_labes[i])
+            else:
+                Map.addLayer(ee.Image(imagestoplot[i]), {}, 'gee_image_' + str(i + 1))
+
+    ## add geometry
+    if geometry is not None:
+        eegeom = gis_functions.polygon_fromgeometry(geometry)
+        eegeom = gee_functions.geometry_as_ee(eegeom)
+        Map.addLayer(ee.Image().paint(eegeom, 1, 3), {}, 'region of interest:')
+
+    Map.setControlVisibility(layerControl=True, fullscreenControl=True, latLngPopup=True)
+    return (Map)

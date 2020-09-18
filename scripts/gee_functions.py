@@ -99,6 +99,23 @@ def getfeature_fromeedict(eecollection, attribute, featname):
         aux.append(datadict)
     return (aux)
 
+def get_band_timeseries_summary(gee_satellite_class, vi_name):
+    """get a band time series summary using a single point"""
+
+    if np.logical_not(np.isnan(gee_satellite_class._querypoint[0])):
+        ee_point = coords_togeepoint(gee_satellite_class._querypoint, 100)
+
+        meanDictionary = gee_satellite_class.image_collection.map(lambda img:
+                                           reduce_tosingle_columns(img.select([vi_name]),
+                                                                                 ee_point)).flatten()
+
+        band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
+        band_data.columns = ['date', vi_name]
+
+        return (band_data)
+    else:
+        return print('this function only works using a query point so far')
+
 
 def get_eeimagecover_percentage(eeimage, eegeometry):
     imagewithdata = eeimage.clip(eegeometry).select(0).gt(ee.Number(-100))

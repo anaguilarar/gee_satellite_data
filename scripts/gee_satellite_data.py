@@ -364,7 +364,7 @@ class get_gee_data:
 
         ### set initial properties
         self.mission = mission
-        self._querypoint = np.nan
+        self._querypoint = [np.nan, np.nan]
         self._dates = [start_date, end_date]
         ## get spatial points
         if roi_filename is not None:
