@@ -111,7 +111,9 @@ def get_band_timeseries_summary(gee_satellite_class, vi_name):
 
         band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
         band_data.columns = ['date', vi_name]
-
+        ## filtering na values
+        band_data = band_data.loc[np.logical_not(band_data[vi_name].isnull())]
+        
         return (band_data)
     else:
         return print('this function only works using a query point so far')
