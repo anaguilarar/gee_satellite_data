@@ -1,4 +1,7 @@
 # GEE Satellite data
+<p align="center">
+<img src="https://ciat.cgiar.org/wp-content/uploads/Alliance_logo.png" alt="CIAT" id="logo" data-height-percentage="90" data-actual-width="140" data-actual-height="55">
+</p>
 
 **Contact:** Andrés Aguilar (a.aguilar@cgiar.org)
 
