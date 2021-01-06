@@ -3,6 +3,7 @@ import json
 import geopandas as gpd
 import numpy as np
 from datetime import timedelta
+import pandas as pd
 from scripts import gis_functions
 
 ee.Initialize()
@@ -98,6 +99,25 @@ def getfeature_fromeedict(eecollection, attribute, featname):
         aux.append(datadict)
     return (aux)
 
+def get_band_timeseries_summary(gee_satellite_class, vi_name):
+    """get a band time series summary using a single point"""
+
+    if np.logical_not(np.isnan(gee_satellite_class._querypoint[0])):
+        ee_point = coords_togeepoint(gee_satellite_class._querypoint, 100)
+
+        meanDictionary = gee_satellite_class.image_collection.map(lambda img:
+                                           reduce_tosingle_columns(img.select([vi_name]),
+                                                                                 ee_point)).flatten()
+
+        band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
+        band_data.columns = ['date', vi_name]
+        ## filtering na values
+        band_data = band_data.loc[np.logical_not(band_data[vi_name].isnull())]
+        
+        return (band_data)
+    else:
+        return print('this function only works using a query point so far')
+
 
 def get_eeimagecover_percentage(eeimage, eegeometry):
     imagewithdata = eeimage.clip(eegeometry).select(0).gt(ee.Number(-100))
@@ -186,3 +206,32 @@ def select_imagesfromcollection(image_collection, indexes):
         imageslist.append(eelistimages.get(int(eeimageindex)))
 
     return ee.ImageCollection(ee.List(imageslist))
+
+
+def coords_togeepoint(point_coordinates, buffer):
+    """transforming from was84 coordnates to gee points"""
+    return ee.Geometry.Point(point_coordinates[0], point_coordinates[1]).buffer(buffer);
+
+    return None
+
+
+def reduce_tosingle_columns(image, region):
+    mean = image.reduceRegions(region, 'mean', 10);
+
+    return mean.map(lambda f:
+                    f.set('date', ee.Date(image.get('system:time_start')).
+                          format('YYYY-MM-dd'))
+                    )
+
+
+def fromeedict_totimeseriesfeatures(ee_dict, featurename):
+    dates = []
+    feature_values = []
+    for i in range(len(ee_dict['features'])):
+        dates.append(ee_dict['features'][i]['properties']['date'])
+        if len(ee_dict['features'][i]['properties']) > 1:
+            feature_values.append(ee_dict['features'][i]['properties'][featurename])
+        else:
+            feature_values.append(np.nan)
+
+    return pd.DataFrame({'date': dates, featurename: feature_values})

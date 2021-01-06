@@ -9,6 +9,7 @@ import shutil
 import warnings
 import folium
 import geehydro
+import time
 
 from datetime import timedelta
 from scripts import gee_functions, s2_functions
@@ -47,35 +48,25 @@ s2_stdnames = {
 
 class get_gee_data:
     """Download optical and radar data from Google Earth Engine platform.
-
            the final output will be a pool of images.
-
-
            Parameters
            ----------
-
            start_date : str
                    The start of the time period used for data extraction, it must have the folowing format "YYYY-MM-DD"
-
            end_date : str
                   The end of the time period used for data extraction., it must have the following format "YYYY-MM-DD"
-
            roi_filename : str
                    string path to a shape file that must conatains limited the region of interest
-
            bands : list str
                    a list of bands that are going to be selected for its download
-
            output_path : str
                    string path to a destination folder
-
            mission : str
                    id reference to the satellite which will be processed:
                        - Sentinel 2 - surface reflectance level: "sentinel2_sr"
                        - Sentinel 2 - top of atmosphere reflectance: "sentinel2_toa"
                        - Sentinel 1: "sentinel1"
                        - Landsat 8: "landsat8_t1sr"
-
            Attributes
            ----------
            dates : dict
@@ -274,7 +265,6 @@ class get_gee_data:
           params: An object containing request parameters with the
               following possible values:
                   days (integer) size of the time window in days
-
         Returns:
           image_collection reduced by a time window where their dates and images are the average.
         """
@@ -354,18 +344,27 @@ class get_gee_data:
 
     def __init__(self, start_date,
                  end_date,
-                 roi_filename,
-                 mission,
+                 roi_filename=None,
+                 mission=None,
+                 point_coordinates=None,
                  bands=None,
                  cloud_percentage=100,
-                 remove_clouds=True):
+                 remove_clouds=True,
+                 buffer=50):
 
         ### set initial properties
         self.mission = mission
-
+        self._querypoint = [np.nan, np.nan]
         self._dates = [start_date, end_date]
         ## get spatial points
-        self._ee_sp = gee_functions.geometry_as_ee(roi_filename)
+        if roi_filename is not None:
+            self._ee_sp = gee_functions.geometry_as_ee(roi_filename)
+        ## setting a single point as geometry
+        if point_coordinates is not None:
+            if len(point_coordinates) == 2:
+                self._ee_sp = gee_functions.coords_togeepoint(point_coordinates, buffer)
+                self._querypoint = point_coordinates
+
 
         self._bands = missions_bands[mission]
 
@@ -451,7 +450,6 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
               scale (integer) the spatial resolution, 10 is the default number
               bands (list) a list with the bands that will be selected. None is the dafault
               cover_percentage (integer) a limit for coverage
-
     Returns:
       None.
     """
@@ -517,6 +515,82 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
         print("the input file must be a get_gee_data class")
 
 
+
+def download_gee_todrive(geedata_class, outputdrive_folder="satellite_images", regionid="",
+                         scale=10, bands=None, cover_percentage=None):
+    """Download gee satellite collection to google drive storage.
+    Args:
+      params: An object containing request parameters with the
+          following possible values:
+              geedata_class (get_gee_data) the gee class that contains all gee data.
+              regionid (string) an id for images identification
+              scale (integer) the spatial resolution, 10 is the default number
+              bands (list) a list with the bands that will be selected. None is the dafault
+              cover_percentage (integer) a limit for coverage
+
+    Returns:
+      None.
+    """
+
+    if isinstance(geedata_class, get_gee_data):
+
+        #        if geedata_class._imagreducedbydays is None:
+        #            imgcollection = geedata_class.image_collection
+        #            dates = geedata_class.dates
+        # else:
+        #    imgcollection = geedata_class._imagreducedbydays
+        #    dates = geedata_class._dates_reduced
+
+        imgcollection = geedata_class.image_collection
+        dates = geedata_class.dates
+
+        collsummary = geedata_class.summary.copy()
+        if bands is not None:
+            imgcollection = imgcollection.select(bands)
+        else:
+            bands = geedata_class._bands
+
+        if cover_percentage is not None:
+            listofindexes = collsummary.loc[collsummary.cover_percentage > cover_percentage].index.values
+            dates = dates.loc[collsummary.cover_percentage > cover_percentage]
+            imgcollection = gee_functions.select_imagesfromcollection(imgcollection, listofindexes)
+
+        ## change dates format
+
+
+        dates_str = general_functions.to_stringdates(dates)
+
+        ## donwload each image
+
+        filenames = [('{}_{}_{}_{}m').format(geedata_class._prefix, dates_str[i], regionid, str(scale)) for i in
+                     range(len(dates_str))]
+
+        wrongfiles = []
+        for i in range(len(filenames)):
+            image_todownload = imgcollection.toList(imgcollection.size()).get(i)
+            task = ee.batch.Export.image.toDrive(**{
+                'image': ee.Image(image_todownload),
+                'description': filenames[i],
+                'folder': outputdrive_folder,
+                'scale': scale,
+                'region': geedata_class._ee_sp['coordinates']
+            })
+            task.start()
+            while task.active():
+                print('Polling for task (id: {}).'.format(filenames[i]))
+                time.sleep(20)
+#            except:
+#               wrongfiles.append(filenames[i])
+
+        if len(wrongfiles) > 0:
+            print('these {} files created a conflict at the moment of its download'.format(wrongfiles))
+
+
+
+    else:
+        print("the input file must be a get_gee_data class")
+
+
 def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):
     ## get the map center coordinates from the geometry
     centergeometry = gis_functions.geometry_center(geometry)
@@ -544,3 +618,4 @@ def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):
 def merge_eeimages(eelist, bandnames):
     meannames = [i + "_mean" for i in bandnames]
     return ee.ImageCollection(eelist).reduce(ee.Reducer.mean()).select(meannames, bandnames)
+
