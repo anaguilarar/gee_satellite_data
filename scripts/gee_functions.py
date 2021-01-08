@@ -68,7 +68,7 @@ def date_listperdays(imgcollection, ndays):
 ### ee geometry
 def geometry_as_ee(filename):
     """transform shapefile format to ee geometry"""
-    ### read csv file
+    ### read csv fileget_band_timeseries_summary
     if (type(filename) == str):
         sp_geometry = gpd.read_file(filename)
         ## reproject spatial data
@@ -84,9 +84,40 @@ def geometry_as_ee(filename):
         sp_geometry = filename
 
     ## get geometry points in json format
-    jsonFormat = json.loads(sp_geometry.to_json())['features'][0]['geometry']
+    if len(json.loads(sp_geometry.to_json())['features']) > 1:
+        jsoncoordinates = define_wrap_box(json.loads(sp_geometry.to_json())['features'])
+        output = [ee.Geometry.Polygon(jsoncoordinates),
+                  [[ee.Geometry.Polygon(json.loads(sp_geometry.to_json()
+                                                  )['features'][i]['geometry']['coordinates'])
+                   for i in range(len(json.loads(sp_geometry.to_json())['features']))],
+                   [json.loads(sp_geometry.to_json())['features'][i]['properties']
+                       for i in range(len(json.loads(sp_geometry.to_json())['features']))]
+                  ]]
 
-    return ee.Geometry.Polygon(jsonFormat['coordinates'])
+    else:
+        jsoncoordinates = json.loads(sp_geometry.to_json()
+                                     )['features'][0]['geometry']['coordinates']
+        output = [ee.Geometry.Polygon(jsoncoordinates)]
+
+    return output
+
+
+def define_wrap_box(json_coordinates):
+    lonmins = []
+    longmax = []
+    latmin = []
+    latmax = []
+    for i in range(len(json_coordinates)):
+        boundbox = json_coordinates[i]['geometry']['coordinates']
+        lonmins.append(np.array(boundbox).T[0].min())
+        longmax.append(np.array(boundbox).T[0].max())
+        latmin.append(np.array(boundbox).T[1].min())
+        latmax.append(np.array(boundbox).T[1].max())
+
+    return [[[np.array(longmax).max(), np.array(latmin).min()],
+             [np.array(longmax).max(), np.array(latmax).max()],
+             [np.array(lonmins).min(), np.array(latmax).max()],
+             [np.array(lonmins).min(), np.array(latmin).min()]]]
 
 
 def getfeature_fromeedict(eecollection, attribute, featname):
@@ -99,24 +130,49 @@ def getfeature_fromeedict(eecollection, attribute, featname):
         aux.append(datadict)
     return (aux)
 
-def get_band_timeseries_summary(gee_satellite_class, vi_name):
+
+def reduceregion_totable(geedataclass, band, eegeom):
+    meanDictionary = geedataclass.image_collection.map(lambda img:
+                                                       reduce_tosingle_columns(img.select([band]),
+                                                                               eegeom)).flatten()
+
+    band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
+    band_data.columns = ['date', band]
+    ## filtering na values
+    band_data = band_data.loc[np.logical_not(band_data[band].isnull())]
+    return band_data
+
+
+def get_band_timeseries_summary(gee_satellite_class, vi_name, buffer=100):
     """get a band time series summary using a single point"""
+    band_data = np.nan
 
     if np.logical_not(np.isnan(gee_satellite_class._querypoint[0])):
-        ee_point = coords_togeepoint(gee_satellite_class._querypoint, 100)
+        ee_point = coords_togeepoint(gee_satellite_class._querypoint, buffer)
+        band_data = reduceregion_totable(gee_satellite_class, vi_name,
+                                         ee_point)
 
-        meanDictionary = gee_satellite_class.image_collection.map(lambda img:
-                                           reduce_tosingle_columns(img.select([vi_name]),
-                                                                                 ee_point)).flatten()
+    elif len(gee_satellite_class._multiple_polygons)==1:
+        band_data = reduceregion_totable(gee_satellite_class, vi_name,
+                                         gee_satellite_class._ee_sp)
 
-        band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
-        band_data.columns = ['date', vi_name]
-        ## filtering na values
-        band_data = band_data.loc[np.logical_not(band_data[vi_name].isnull())]
-        
-        return (band_data)
+    elif len(gee_satellite_class._multiple_polygons)==2:
+        polygons = gee_satellite_class._multiple_polygons[0]
+
+        features = gee_satellite_class._multiple_polygons[1]
+        outtables = []
+        for i in range(len(polygons)):
+
+            outtable = reduceregion_totable(gee_satellite_class, vi_name,
+                                             polygons[i])
+            outtable['properties'] = str(features[i])
+            outtables.append(outtable)
+        band_data= pd.concat(outtables)
+
     else:
         return print('this function only works using a query point so far')
+
+    return band_data
 
 
 def get_eeimagecover_percentage(eeimage, eegeometry):
@@ -161,13 +217,6 @@ def get_eeurl(imagecollection, geometry, scale=10):
     return imagesurls
 
 
-def query_image_collection(initdate, enddate, satellite_mission, ee_sp):
-    """mission data query"""
-
-    ## mission data query
-    return ee.ImageCollection(satellite_mission).filterDate(initdate, enddate).filterBounds(ee_sp)
-
-
 def LatLonImg(img, geometry, scale):
     img = img.addBands(ee.Image.pixelLonLat())
 
@@ -179,6 +228,13 @@ def LatLonImg(img, geometry, scale):
     return lats, lons, data
 
 
+def query_image_collection(initdate, enddate, satellite_mission, ee_sp):
+    """mission data query"""
+
+    ## mission data query
+    return ee.ImageCollection(satellite_mission).filterDate(initdate, enddate).filterBounds(ee_sp)
+
+
 def reduce_meanimagesbydates(satcollection, date_init, date_end):
     # imagesfiltered = ee.ImageCollection(satcollection.filterDate(date_init, date_end))
 
@@ -186,6 +242,7 @@ def reduce_meanimagesbydates(satcollection, date_init, date_end):
     outputimage = ee.Image(satcollection.filterDate(date_init, date_end).mean())
 
     return outputimage
+
 
 def reduce_imgs_by_days(image_collection, days):
     dates = date_listperdays(image_collection, days)

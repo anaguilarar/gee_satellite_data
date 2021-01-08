@@ -4,12 +4,16 @@ from scripts import gee_functions
 from scripts import gis_functions
 import folium
 import ee
+import plotly.express as px
+
 
 def plot_vi_time_series(gee_satellite_class, vi_name):
-
-    ndvi_data = gee_functions.get_band_timeseries_summary(gee_satellite_class, vi_name)
-
-    fig = go.Figure(data=go.Scatter(x=ndvi_data.date, y=ndvi_data[vi_name]))
+    band_data = gee_functions.get_band_timeseries_summary(gee_satellite_class, vi_name)
+    if band_data.shape[1] > 2:
+        # fig = go.Figure(data=go.Scatter(x=band_data.date, y=band_data[vi_name], color=band_data['properties']))
+        fig = px.line(band_data, x="date", y=vi_name, color="properties")
+    else:
+        fig = go.Figure(data=go.Scatter(x=band_data.date, y=band_data[vi_name]))
 
     fig.update_layout(
         xaxis=dict(
@@ -57,10 +61,17 @@ def plot_vi_time_series(gee_satellite_class, vi_name):
 
     fig.show()
 
-def plot_multiple_eeimage(imagestoplot, visparameters=None, geometry=None, images_labes = None,zoom=9.5):
+
+def plot_multiple_eeimage(imagestoplot, visparameters=None,
+                          geometry=None, images_labes=None, zoom=9.5):
     ##
     ## get the map center coordinates from the geometry
-    centergeometry = gis_functions.geometry_center(geometry)
+    mult_pols = False
+    if len(geometry[0]) == 2:
+        centergeometry = gis_functions.geometry_center(geometry)
+    else:
+        centergeometry = gis_functions.geometry_center(geometry[0])
+
     Map = folium.Map(location=[centergeometry[1],
                                centergeometry[0]], zoom_start=zoom)
     for i in range(len(imagestoplot)):
@@ -68,7 +79,7 @@ def plot_multiple_eeimage(imagestoplot, visparameters=None, geometry=None, image
             if images_labes is not None:
                 Map.addLayer(ee.Image(imagestoplot[i]), visparameters[i], images_labes[i])
             else:
-                Map.addLayer(ee.Image(imagestoplot[i]), visparameters[i], 'gee_image_'+str(i+1))
+                Map.addLayer(ee.Image(imagestoplot[i]), visparameters[i], 'gee_image_' + str(i + 1))
         else:
             if images_labes is not None:
                 Map.addLayer(ee.Image(imagestoplot[i]), {}, images_labes[i])
@@ -77,9 +88,15 @@ def plot_multiple_eeimage(imagestoplot, visparameters=None, geometry=None, image
 
     ## add geometry
     if geometry is not None:
-        eegeom = gis_functions.polygon_fromgeometry(geometry)
-        eegeom = gee_functions.geometry_as_ee(eegeom)
-        Map.addLayer(ee.Image().paint(eegeom, 1, 3), {}, 'region of interest:')
+        if len(geometry[0]) > 2:
+            for i in range(len(geometry)):
+                eegeom = gis_functions.polygon_fromgeometry(geometry[i])
+                eegeom = gee_functions.geometry_as_ee(eegeom)[0]
+                Map.addLayer(ee.Image().paint(eegeom, 1, 3), {}, 'region of interest {}:'.format(i))
+        else:
+            eegeom = gis_functions.polygon_fromgeometry(geometry)
+            eegeom = gee_functions.geometry_as_ee(eegeom)[0]
+            Map.addLayer(ee.Image().paint(eegeom, 1, 3), {}, 'region of interest:')
 
     Map.setControlVisibility(layerControl=True, fullscreenControl=True, latLngPopup=True)
     return (Map)

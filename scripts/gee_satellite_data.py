@@ -356,9 +356,13 @@ class get_gee_data:
         self.mission = mission
         self._querypoint = [np.nan, np.nan]
         self._dates = [start_date, end_date]
+        self._multiple_polygons = [np.nan]
         ## get spatial points
         if roi_filename is not None:
-            self._ee_sp = gee_functions.geometry_as_ee(roi_filename)
+            ee_geometry = gee_functions.geometry_as_ee(roi_filename)
+            if len(ee_geometry) > 1:
+                self._multiple_polygons = ee_geometry[1]
+            self._ee_sp = ee_geometry[0]
         ## setting a single point as geometry
         if point_coordinates is not None:
             if len(point_coordinates) == 2:
@@ -605,7 +609,7 @@ def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):
     ## add geometry
     if geometry is not None:
         eegeom = gis_functions.polygon_fromgeometry(geometry)
-        eegeom = gee_functions.geometry_as_ee(eegeom)
+        eegeom = gee_functions.geometry_as_ee(eegeom)[0]
         Map.addLayer(ee.Image().paint(eegeom, 1, 3), {}, 'region of interest:')
 
     Map.setControlVisibility(layerControl=True, fullscreenControl=True, latLngPopup=True)
