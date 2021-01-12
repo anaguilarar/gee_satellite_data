@@ -132,14 +132,25 @@ def getfeature_fromeedict(eecollection, attribute, featname):
 
 
 def reduceregion_totable(geedataclass, band, eegeom):
-    meanDictionary = geedataclass.image_collection.map(lambda img:
+    """ Reduce data to region  """
+
+    if type(band) is list:
+        meanDictionary = geedataclass.image_collection.map(lambda img:
+                                                           reduce_tosingle_columns(img.select(band),
+                                                                                   eegeom)).flatten()
+        band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), band)
+        #band_data.columns = ['date', band]
+        band_data = band_data.loc[np.logical_not(band_data[band[0]].isnull())]
+
+    else:
+        meanDictionary = geedataclass.image_collection.map(lambda img:
                                                        reduce_tosingle_columns(img.select([band]),
                                                                                eegeom)).flatten()
+        band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
+        band_data.columns = ['date', band]
 
-    band_data = fromeedict_totimeseriesfeatures(meanDictionary.getInfo(), 'mean')
-    band_data.columns = ['date', band]
-    ## filtering na values
-    band_data = band_data.loc[np.logical_not(band_data[band].isnull())]
+        ## filtering na values
+        band_data = band_data.loc[np.logical_not(band_data[band].isnull())]
     return band_data
 
 
@@ -287,8 +298,31 @@ def fromeedict_totimeseriesfeatures(ee_dict, featurename):
     for i in range(len(ee_dict['features'])):
         dates.append(ee_dict['features'][i]['properties']['date'])
         if len(ee_dict['features'][i]['properties']) > 1:
-            feature_values.append(ee_dict['features'][i]['properties'][featurename])
-        else:
-            feature_values.append(np.nan)
+            if type(featurename) is list:
+                values = []
+                for j in featurename:
+                    val = ee_dict['features'][i]['properties'][j]
 
-    return pd.DataFrame({'date': dates, featurename: feature_values})
+                    values.append(val)
+                tempdf = pd.DataFrame(values).transpose()
+                tempdf.columns = featurename
+                # print(tempdf)
+                feature_values.append(values)
+
+            else:
+                feature_values.append(ee_dict['features'][i]['properties'][featurename])
+
+        else:
+            if type(featurename) is list:
+                feature_values.append([np.nan for i in range(len(featurename))])
+            else:
+                feature_values.append(np.nan)
+    if type(featurename) is list:
+
+        df_band_values = pd.DataFrame(np.array(feature_values), columns=featurename)
+        df_band_values['date'] = dates
+
+    else:
+        df_band_values = pd.DataFrame({'date': dates, featurename: feature_values})
+
+    return df_band_values
