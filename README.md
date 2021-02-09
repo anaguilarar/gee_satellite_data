@@ -1,22 +1,33 @@
 # GEE Satellite data
 <p align="center">
 <img src="https://ciat.cgiar.org/wp-content/uploads/Alliance_logo.png" alt="CIAT" id="logo" data-height-percentage="90" data-actual-width="140" data-actual-height="55">
+<img src="images/CCAFS.png" alt="CCAFS" id="logo2" data-height-percentage="90" width="230" height="52">
 </p>
+
 
 **Contact:** Andrés Aguilar (a.aguilar@cgiar.org)
 
-## 1. Purpose
+## 1. Introduction
+
+Crops are exposed to several factors that affect their profitability. High production cost, fluctuation in prices, climate change, disease outbreaks, and overproduction are some of the challenges that growers must face. For that reason, it is important to have initiatives that leverage farmers' production conditions. In this sense, crop data is valuable to bring farmers support at the moment to make decisions on their agronomical practices. Besides crop mapping provides a basic regional context useful for production plannig. Due to the relevance of getting data about crop development, many efforts have been carried out to get accurate and timely information. One of the most common methods is through surveys. Regardless of its high accuracy, this methodology is time-consuming and hard to implement on a large scale. For that reason, new sources of information are required to obtain high-frequency data at a low cost. 
+
+During the last decade, several studies have successfully proved the remote sensing capability on monitoring vegetation, creating valuable data for characterizing crop conditions.
+
+
+## 2. Purpose
+
+The purpose of this repository is to provide alternatives for easy satellite missions data access throughout google earth engine project.
 
 This repository was created for downloading and processing satellite data. The required inputs are the path, in which contains a vector file in ESRI-Shapefile format for the region of interest, and the satellite mission index. 
 
-## 2. Usage
+## 3. Usage
 
 * **Step 1:** [Sign up](https://earthengine.google.com/signup/) for [Google Earth Engine](https://earthengine.google.com/).
 * **Step 2:** Install conda or minicoda.
 * **Step 3:** Install the [Google Earth Engine Plugin for python](https://developers.google.com/earth-engine/python_install-conda)
 * **Step 4:** Git clone or [download](https://github.com/anaguilarar/gee_satellite_data.git) this repository.
 
-## 3. Requirements
+## 4. Requirements
 
 * Python Version >= 3.6
 * Libraries:
@@ -114,4 +125,6 @@ gee_satellite_data.download_gee_tolocal(sentinel2, ##
                                        )
 ```
 
-
+More examples are shown in following colabs:
+* [Download satellite data](https://github.com/anaguilarar/gee_satellite_data/blob/master/Download%20Satellite%20Data.ipynb)
+* [Extracting data using spatial features](github.com/anaguilarar/gee_satellite_data/blob/master/examples/query_using_a_single_point.ipynb)
