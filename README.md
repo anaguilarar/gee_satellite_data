@@ -5,8 +5,6 @@
 </p>
 
 
-**Contact:** Andrés Aguilar (a.aguilar@cgiar.org)
-
 ## 1. Introduction
 
 Crops are exposed to several factors that affect their profitability. High production cost, fluctuation in prices, climate change, disease outbreaks, and overproduction are some of the challenges that growers must face. For that reason, it is important to have initiatives that leverage farmers' production conditions. In this sense, crop data is valuable to bring farmers support at the moment to make decisions on their agronomical practices. Besides crop mapping provides a basic regional context useful for production plannig. Due to the relevance of getting data about crop development, many efforts have been carried out to get accurate and timely information. One of the most common methods is through surveys. Regardless of its high accuracy, this methodology is time-consuming and hard to implement on a large scale. For that reason, new sources of information are required to obtain high-frequency data at a low cost. 
