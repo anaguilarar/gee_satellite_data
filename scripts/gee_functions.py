@@ -55,6 +55,7 @@ def dates_maxcover(df, limit=80, numdays=20):
 
 
 def date_listperdays(imgcollection, ndays):
+    imgcollection = imgcollection.sort('system:time_start', True)
     days = ee.List.sequence(0, ee.Date(ee.Image(imgcollection.sort('system:time_start', False)
                                                 .first()).get('system:time_start'))
                             .difference(ee.Date(ee.Image(imgcollection.first())
