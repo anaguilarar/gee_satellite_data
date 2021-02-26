@@ -42,8 +42,9 @@ This repository was created for downloading and processing satellite data. The r
 ## Get started
 
 The following example shows a workflow for querying, previewing and downloading satellite data from Google Earth Engine using Python.
-Currently, there are available three different missions. 
+Currently, there are four different missions available. 
   * [Sentinel 2 level-2A](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR)
+  * [Sentinel 2 level-1C](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2)
   * [Sentinel 1 GRD](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S1_GRD)
   * [Landsat 8 surface reflectance](https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC08_C01_T1_SR)
 
