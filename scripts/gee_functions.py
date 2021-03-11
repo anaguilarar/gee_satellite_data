@@ -327,3 +327,80 @@ def fromeedict_totimeseriesfeatures(ee_dict, featurename):
         df_band_values = pd.DataFrame({'date': dates, featurename: feature_values})
 
     return df_band_values
+
+
+def filtering_bycoverpercentage(geedata_class, cover_percentage=95):
+    imgcollection = geedata_class.image_collection
+    dates = geedata_class.dates
+    orig_date_size = len(dates)
+    collsummary = geedata_class.summary.copy()
+    listofindexes = collsummary.loc[collsummary.cover_percentage > cover_percentage].index.values
+    #dates = dates.loc[collsummary.cover_percentage > cover_percentage]
+    imgcollection = select_imagesfromcollection(imgcollection, listofindexes)
+    ### TODO: image indexes distributed across time
+    print("total images: {} \ntotal images after cover filter: {}".format(orig_date_size, len(listofindexes)))
+
+    return imgcollection
+
+########## IMAGE SEGMENTATION
+
+
+def gee_snic(imgcollection, gee_geometry,
+             bands = ["B4", "B8"],
+             seeds=16,
+             snic_kwargs={
+                 'size': 8,
+                 'compactness': 3,
+                 'connectivity': 8,
+                 'neighborhoodSize': 128
+             }):
+    # bansaftersnic = [i+'_mean' for i in bands]
+    # bansaftersnic.append('clusters')
+
+    seeds = ee.Algorithms.Image.Segmentation.seedGrid(seeds)
+
+    snic = ee.Algorithms.Image.Segmentation.SNIC(
+        image=imgcollection.select(bands).median().clip(gee_geometry),
+        size=snic_kwargs['size'],
+        compactness=snic_kwargs['compactness'],
+        connectivity=snic_kwargs['connectivity'],
+        neighborhoodSize=snic_kwargs['neighborhoodSize'],
+        seeds=seeds
+    )
+
+    # .select(bansaftersnic, bands.append('clusters'))
+
+    return snic
+
+
+def raster_to_polygons(gee_snic, gee_image, gee_geometry, scale=8):
+    """
+    Trasnform an segmented image into polygons
+    :param gee_snic: Segmented image ee.Image()
+    :param gee_image: a reference image which will be used for polygons metrics ee.Image()
+    :param gee_geometry:
+    :param scale:
+    :return:
+    """
+    vectors = gee_snic.select('clusters').addBands(
+        gee_image).reduceToVectors(
+        geometry=gee_geometry,
+        crs=gee_snic.projection(),
+        scale=scale,
+        geometryType='polygon',
+        eightConnected=False,
+        labelProperty='zone',
+        reducer=ee.Reducer.mean(),
+        maxPixels=120000000,
+        bestEffort=True
+    )
+    return vectors
+
+
+def reduce_image_to_superpixel(image, polygons):
+    img = ee.Image(image).reduceRegions(polygons, ee.Reducer.mean(), scale=10)
+    img = img.reduceToImage(
+        properties=['mean'],
+        reducer=ee.Reducer.first())
+    return img
+

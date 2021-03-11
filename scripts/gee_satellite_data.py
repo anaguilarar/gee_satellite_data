@@ -25,7 +25,8 @@ missions_bands = {
     'sentinel1': ['VV', 'VH'],
     'landsat8_t1sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11', 'sr_aerosol', 'pixel_qa', 'radsat_qa'],
     'sentinel2_sr': ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12',
-                     'QA60', 'MSK_CLDPRB', "SCL"]
+                     'QA60', 'MSK_CLDPRB', "SCL"],
+    'sentinel2_toa': ['QA60', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B10', 'B11', 'B12']
 }
 
 l8_stdnames = {
@@ -38,6 +39,13 @@ s2_stdnames = {
     'B5': 'rededge1', 'B6': 'rededge2', 'B7': 'rededge3', 'B8': 'nir',
     'B8A': 'nir2', 'B9': 'water_vapour', 'B11': 'swir1', 'B12': 'swir2',
     'MSK_CLDPRB': 'pixel_qa', 'SCL': 'qa_class', 'QA60': 'pixel_qa_2'
+}
+
+s2_toa_stdnames = {
+    'B1': 'cb', 'B2': 'blue', 'B3': 'green', 'B4': 'red',
+    'B5': 're1', 'B6': 're2', 'B7': 're3', 'B8': 'nir',
+    'B8A': 're4', 'B9': 'waterVapor', 'B10': 'cirrus', 'B11': 'swir1', 'B12': 'swir2',
+    'QA60': 'QA60'
 }
 
 
@@ -174,6 +182,9 @@ class get_gee_data:
             if self.mission == "landsat8_t1sr":
                 std_names = [l8_stdnames[i] for i in self._bands]
 
+            if self.mission == "sentinel2_toa":
+                std_names = [s2_toa_stdnames[i] for i in self._bands]
+
             self.image_collection = self.image_collection.map(lambda img:
                                                               gee_functions.add_vegetation_index(img, vegetation_index,
                                                                                                  self._bands, std_names)
@@ -272,11 +283,11 @@ class get_gee_data:
         ## remove those elements with null data
         self._imagreducedbydays = ee.ImageCollection(
             gee_functions.reduce_imgs_by_days(self.image_collection, days)).map(lambda image:
-                                                                  image.set(
-                                                                      'count',
-                                                                      ee.Image(
-                                                                          image).bandNames().length())
-                                                                  ).filter(
+                                                                                image.set(
+                                                                                    'count',
+                                                                                    ee.Image(
+                                                                                        image).bandNames().length())
+                                                                                ).filter(
             ee.Filter.eq('count', len(self._bands))).map(lambda img:
                                                          img.divide(10).multiply(10)
                                                          )
@@ -302,7 +313,7 @@ class get_gee_data:
             ## get indexes from summary
             indexesdup = list(self.dates.loc[self.dates.apply(
                 lambda x: x.strftime("%Y%m%d")) ==
-                                               self._checkmultyple_tiles[1][dateindex]].index)
+                                             self._checkmultyple_tiles[1][dateindex]].index)
 
             imageslist = []
 
@@ -325,7 +336,7 @@ class get_gee_data:
         for dateindex in range(len(self._checkmultyple_tiles[2])):
             indexesdup = list(self.dates.loc[self.dates.apply(
                 lambda x: x.strftime("%Y%m%d")) ==
-                                               self._checkmultyple_tiles[2][dateindex]].index)
+                                             self._checkmultyple_tiles[2][dateindex]].index)
 
             reducedimages.append(self.image_collection.toList(self.image_collection.size()).get(indexesdup[0]))
 
@@ -357,18 +368,20 @@ class get_gee_data:
         self._querypoint = [np.nan, np.nan]
         self._dates = [start_date, end_date]
         self._multiple_polygons = [np.nan]
+
         ## get spatial points
+
         if roi_filename is not None:
             ee_geometry = gee_functions.geometry_as_ee(roi_filename)
             if len(ee_geometry) > 1:
                 self._multiple_polygons = ee_geometry[1]
             self._ee_sp = ee_geometry[0]
+
         ## setting a single point as geometry
         if point_coordinates is not None:
             if len(point_coordinates) == 2:
                 self._ee_sp = gee_functions.coords_togeepoint(point_coordinates, buffer)
                 self._querypoint = point_coordinates
-
 
         self._bands = missions_bands[mission]
 
@@ -420,8 +433,52 @@ class get_gee_data:
             if bands is not None:
                 self._bands = bands
 
+        if mission == "sentinel2_toa":
+            self.image_collection = self.image_collection.select(self._bands
+                                                                 ).filterMetadata('CLOUDY_PIXEL_PERCENTAGE',
+                                                                                  'less_than',
+                                                                                  cloud_percentage
+                                                                                  ).filterMetadata(
+                'CLOUD_COVERAGE_ASSESSMENT',
+                'less_than',
+                cloud_percentage)
+
+            def scaleBands(image):
+                metadata = image.toDictionary()
+                t = image.select(
+                    ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B10', 'B11', 'B12']
+                ).divide(10000)
+                t = t.addBands(image.select(['QA60'])).set(metadata
+                                                         ).copyProperties(image,
+                                                                          ['system:time_start', 'system:footprint'])
+                return ee.Image(t)
+
+            self._bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8',
+                           'B8A', 'B9', 'B10', 'B11', 'B12', 'QA60']
+
+            std_names = [s2_toa_stdnames[i] for i in self._bands]
+
+            self.image_collection = self.image_collection.map(lambda img:
+                                                              scaleBands(img))
+
+            self.image_collection = self.image_collection.select(self._bands, std_names)
+
+            if remove_clouds is True:
+                self.image_collection = s2_functions.shadowMask(self.image_collection, self._ee_sp)
+                self.image_collection = s2_functions.QAMaskCloud(self.image_collection)
+                #self.image_collection = s2_functions.sentinelCloudScore(self.image_collection)
+                #self.image_collection = s2_functions.topoCorrection(self.image_collection)
+
+            self.image_collection = self.image_collection.select(std_names, self._bands)
+
+            if bands is not None:
+                self._bands = bands
+
         self._checkmultyple_tiles = self.check_duplicated_tiles()
-        if self._checkmultyple_tiles[0] == True and (mission == "sentinel2_sr" or mission == "landsat8_t1sr"):
+
+        if self._checkmultyple_tiles[0] == True and (mission == "sentinel2_sr" or
+                                                     mission == "landsat8_t1sr" or
+                                                     mission == "sentinel2_toa"):
             self.image_collection = self.reduce_duplicatedates()
 
         self._set_coverpercentageasproperty()
@@ -443,7 +500,6 @@ class get_gee_data:
 
 def download_gee_tolocal(geedata_class, outputfolder, regionid="",
                          scale=10, bands=None, cover_percentage=None):
-
     """Download gee satellite collection to local storage.
     Args:
       params: An object containing request parameters with the
@@ -465,10 +521,10 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
             os.mkdir(outputfolder)
             print('the {} was created'.format(outputfolder))
 
-#        if geedata_class._imagreducedbydays is None:
-#            imgcollection = geedata_class.image_collection
-#            dates = geedata_class.dates
-        #else:
+        #        if geedata_class._imagreducedbydays is None:
+        #            imgcollection = geedata_class.image_collection
+        #            dates = geedata_class.dates
+        # else:
         #    imgcollection = geedata_class._imagreducedbydays
         #    dates = geedata_class._dates_reduced
 
@@ -510,14 +566,13 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
             except:
                 wrongfiles.append(filename)
 
-        if len(wrongfiles)>0:
+        if len(wrongfiles) > 0:
             print('these {} files created a conflict at the moment of its download'.format(wrongfiles))
 
 
 
     else:
         print("the input file must be a get_gee_data class")
-
 
 
 def download_gee_todrive(geedata_class, outputdrive_folder="satellite_images", regionid="",
@@ -561,7 +616,6 @@ def download_gee_todrive(geedata_class, outputdrive_folder="satellite_images", r
 
         ## change dates format
 
-
         dates_str = general_functions.to_stringdates(dates)
 
         ## donwload each image
@@ -583,8 +637,8 @@ def download_gee_todrive(geedata_class, outputdrive_folder="satellite_images", r
             while task.active():
                 print('Polling for task (id: {}).'.format(filenames[i]))
                 time.sleep(20)
-#            except:
-#               wrongfiles.append(filenames[i])
+        #            except:
+        #               wrongfiles.append(filenames[i])
 
         if len(wrongfiles) > 0:
             print('these {} files created a conflict at the moment of its download'.format(wrongfiles))
@@ -622,4 +676,3 @@ def plot_eeimage(imagetoplot, visparameters=None, geometry=None, zoom=9.5):
 def merge_eeimages(eelist, bandnames):
     meannames = [i + "_mean" for i in bandnames]
     return ee.ImageCollection(eelist).reduce(ee.Reducer.mean()).select(meannames, bandnames)
-
