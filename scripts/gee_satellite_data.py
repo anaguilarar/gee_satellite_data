@@ -361,7 +361,10 @@ class get_gee_data:
                  bands=None,
                  cloud_percentage=100,
                  remove_clouds=True,
-                 buffer=50):
+                 buffer=50,
+                 _zScoreThresh=-2,
+                 _shadowSumThresh=0.15,
+                 _cloudScoreThresh = 8):
 
         ### set initial properties
         self.mission = mission
@@ -464,9 +467,12 @@ class get_gee_data:
             self.image_collection = self.image_collection.select(self._bands, std_names)
 
             if remove_clouds is True:
-                self.image_collection = s2_functions.shadowMask(self.image_collection, self._ee_sp)
+                self.image_collection = s2_functions.shadowMask(self.image_collection, self._ee_sp,
+                                                                zScoreThresh=_zScoreThresh,
+                                                                shadowSumThresh=_shadowSumThresh)
                 self.image_collection = s2_functions.QAMaskCloud(self.image_collection)
-                #self.image_collection = s2_functions.sentinelCloudScore(self.image_collection)
+                #self.image_collection = s2_functions.sentinelCloudScore(self.image_collection,
+                #                                                        cloudScoreThresh=_cloudScoreThresh)
                 #self.image_collection = s2_functions.topoCorrection(self.image_collection)
 
             self.image_collection = self.image_collection.select(std_names, self._bands)

@@ -25,8 +25,8 @@ def maskS2sr(image):
 
 
 def shadowMask(collection, studyArea,
-               zScoreThresh=-0.3,
-               shadowSumThresh=0.18,
+               zScoreThresh=-1.5,
+               shadowSumThresh=0.16,
                contractPixels=1.5,
                dilatePixels=2.5):
     ## taken from: For information and issues please contact: Ate Poortinga (apoortinga@sig-gis.com)
@@ -76,8 +76,18 @@ def sentinelCloudScore(s2s,
                        cloudScoreThresh=10,
                        contractPixels=1.5,
                        dilatePixels=2.5):
+    def maskScore(img):
+        cloudMask = img.select(['cloudScore']).lt(
+            cloudScoreThresh).focal_max(
+            contractPixels).focal_min(dilatePixels).rename('cloudMask')
+        return img.updateMask(cloudMask).addBands(cloudMask)
+
     def getCloudScore(img):
         # Compute several indicators of cloudyness and take the minimum of them.
+        def rescale(img, exp, thresholds):
+            return img.expression(exp, {img: img}
+                                  ).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
+
         score = ee.Image(1)
         blueCirrusScore = ee.Image(0)
         # Clouds are reasonably bright in the blue or cirrus bands.
@@ -98,14 +108,8 @@ def sentinelCloudScore(s2s,
         score = score.clamp(0, 100)
         return img.addBands(score.rename(['cloudScore']))
 
-    def maskScore(img):
-        cloudMask = img.select(['cloudScore']).lt(
-            cloudScoreThresh).focal_max(
-            contractPixels).focal_min(dilatePixels).rename('cloudMask')
-
-        return img.updateMask(cloudMask).addBands(cloudMask)
-
-    s2s = s2s.map(lambda img: getCloudScore(img))
+    s2s = s2s.map(lambda img:
+                  getCloudScore(img))
     # Find low cloud score pctl for each pixel to avoid comission errors
 
     # minCloudScore = s2s.select(['cloudScore']).reduce(ee.Reducer.percentile([cloudScorePctl]));
@@ -115,9 +119,9 @@ def sentinelCloudScore(s2s,
     return s2s
 
 
-def rescale(img, exp, thresholds):
-    return img.expression(exp, {img: img}
-                          ).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
+#def rescale(img, exp, thresholds):
+#    return img.expression(exp, {img: img}
+#                          ).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
 
 
 PI = ee.Number(3.14159265359)
@@ -398,7 +402,7 @@ def illuminationCorrection(img):
     props = img.toDictionary()
     st = img.get('system:time_start')
     img_plus_ic = img
-    #mask1 = img_plus_ic.select('nir').gt(-0.1)
+    # mask1 = img_plus_ic.select('nir').gt(-0.1)
     mask2 = img_plus_ic.select('slope').gte(5).And(img_plus_ic.select('IC').gte(0)
                                                    ).And(img_plus_ic.select('nir').gt(-0.1))
     img_plus_ic_mask2 = ee.Image(img_plus_ic.updateMask(mask2))
@@ -407,10 +411,10 @@ def illuminationCorrection(img):
     compositeBands = img.bandNames()
     nonCorrectBands = img.select(compositeBands.removeAll(bandList))
 
-    #geom = ee.Geometry(img.get('system:footprint')).bounds().buffer(10000)
+    # geom = ee.Geometry(img.get('system:footprint')).bounds().buffer(10000)
 
     def apply_SCSccorr(band):
-        #method = 'SCSc'
+        # method = 'SCSc'
         out = ee.Image(1).addBands(img_plus_ic_mask2.select('IC', band)
                                    ).reduceRegion(reducer=ee.Reducer.linearRegression(2, 1),
                                                   geometry=ee.Geometry(img.geometry()),
@@ -437,7 +441,7 @@ def illuminationCorrection(img):
         return SCSc_output
 
     imagebandprocess = [apply_SCSccorr(bnd) for bnd in bandList]
-    #img_SCSccorr = ee.Image(bandList.map(
+    # img_SCSccorr = ee.Image(bandList.map(
     #    lambda bnd:
     #    apply_SCSccorr(bnd))).addBands(img_plus_ic.select('IC'))
     img_SCSccorr = ee.Image(imagebandprocess).addBands(img_plus_ic.select('IC'))
