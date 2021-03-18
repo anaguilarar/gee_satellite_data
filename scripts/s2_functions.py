@@ -72,7 +72,34 @@ def QAMaskCloud(collection):
     return collection
 
 
-def sentinelCloudScore(s2s,
+def getCloudScore(img):
+    # Compute several indicators of cloudyness and take the minimum of them.
+    def rescale(img, exp, thresholds):
+        return img.expression(exp, {img: img}
+                              ).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
+
+    score = ee.Image(1)
+    blueCirrusScore = ee.Image(0)
+    # Clouds are reasonably bright in the blue or cirrus bands.
+    # Use.max as a pseudo OR conditional
+    blueCirrusScore = blueCirrusScore.max(rescale(img, 'img.blue', [0.1, 0.5]))
+    blueCirrusScore = blueCirrusScore.max(rescale(img, 'img.cb', [0.1, 0.5]))
+    blueCirrusScore = blueCirrusScore.max(rescale(img, 'img.cirrus', [0.1, 0.3]))
+
+    score = score.min(blueCirrusScore)
+    # Clouds are reasonably bright in all visiblebands.
+    score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]))
+    # Clouds are reasonably bright in all infrared bands.
+    score = score.min(rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]))
+    # However, clouds are not snow.
+    ndsi = img.normalizedDifference(['green', 'swir1'])
+    score = score.min(rescale(ndsi, 'img', [0.8, 0.6]))
+    score = score.multiply(100).byte()
+    score = score.clamp(0, 100)
+    return img.addBands(score.rename(['cloudScore']))
+
+
+def sentinelCloudScore(collection,
                        cloudScoreThresh=10,
                        contractPixels=1.5,
                        dilatePixels=2.5):
@@ -82,44 +109,19 @@ def sentinelCloudScore(s2s,
             contractPixels).focal_min(dilatePixels).rename('cloudMask')
         return img.updateMask(cloudMask).addBands(cloudMask)
 
-    def getCloudScore(img):
-        # Compute several indicators of cloudyness and take the minimum of them.
-        def rescale(img, exp, thresholds):
-            return img.expression(exp, {img: img}
-                                  ).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
-
-        score = ee.Image(1)
-        blueCirrusScore = ee.Image(0)
-        # Clouds are reasonably bright in the blue or cirrus bands.
-        # Use.max as a pseudo OR conditional
-        blueCirrusScore = blueCirrusScore.max(rescale(img, 'img.blue', [0.1, 0.5]))
-        blueCirrusScore = blueCirrusScore.max(rescale(img, 'img.cb', [0.1, 0.5]))
-        blueCirrusScore = blueCirrusScore.max(rescale(img, 'img.cirrus', [0.1, 0.3]))
-
-        score = score.min(blueCirrusScore)
-        # Clouds are reasonably bright in all visiblebands.
-        score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]))
-        # Clouds are reasonably bright in all infrared bands.
-        score = score.min(rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]))
-        # However, clouds are not snow.
-        ndsi = img.normalizedDifference(['green', 'swir1'])
-        score = score.min(rescale(ndsi, 'img', [0.8, 0.6]))
-        score = score.multiply(100).byte()
-        score = score.clamp(0, 100)
-        return img.addBands(score.rename(['cloudScore']))
-
-    s2s = s2s.map(lambda img:
-                  getCloudScore(img))
+    s2s = collection.map(lambda img:
+                         getCloudScore(img))
     # Find low cloud score pctl for each pixel to avoid comission errors
 
     # minCloudScore = s2s.select(['cloudScore']).reduce(ee.Reducer.percentile([cloudScorePctl]));
 
-    s2s = s2s.map(lambda img: maskScore(img))
+    s2s = s2s.map(lambda img:
+                  maskScore(img))
 
     return s2s
 
 
-#def rescale(img, exp, thresholds):
+# def rescale(img, exp, thresholds):
 #    return img.expression(exp, {img: img}
 #                          ).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
 
