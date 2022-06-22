@@ -1,4 +1,4 @@
-numpy==1.18.5
+numpy==1.22.0
 ee==0.4
 folium==0.11.0
 geehydro==0.2.0
