@@ -28,6 +28,12 @@ def add_vegetation_index(image, vi_name, img_bandnames=None,
         equation = '(NIR - SWIR1)/(NIR + SWIR1)'
         kwargs = {'NIR': img_copy.select('nir'),
                   'SWIR1': img_copy.select('swir1')}
+    
+    if vi_name == "nbr":
+        equation = '(NIR - SWIR2)/(NIR + SWIR2)'
+        kwargs = {'NIR': img_copy.select('nir'),
+                  'SWIR2': img_copy.select('swir2')}
+    
 
     return image.addBands(img_copy.expression(equation, kwargs).rename(vi_name))
 

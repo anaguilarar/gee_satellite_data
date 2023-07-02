@@ -158,7 +158,7 @@ class get_gee_data:
             self._mission = 'COPERNICUS/S2'
             self._prefix = 's2_l1c'
         if self.mission == 'sentinel2_sr':
-            self._mission = 'COPERNICUS/S2_SR'
+            self._mission = 'COPERNICUS/S2_SR_HARMONIZED'
             self._prefix = 's2_l2a'
         if self.mission == 'landsat8_t1sr':
             self._mission = 'LANDSAT/LC08/C01/T1_SR'
@@ -171,7 +171,7 @@ class get_gee_data:
                                                                   gee_functions.get_eeimagecover_percentage(img,
                                                                                                             self._ee_sp)))
 
-    def add_vi_layer(self, vegetation_index="ndvi"):
+    def add_vi_layer(self, vegetation_index="ndvi", **kwargs):
 
         currentbands = ee.Image(self.image_collection.first()).bandNames().getInfo()
 
@@ -187,7 +187,7 @@ class get_gee_data:
 
             self.image_collection = self.image_collection.map(lambda img:
                                                               gee_functions.add_vegetation_index(img, vegetation_index,
-                                                                                                 self._bands, std_names)
+                                                                                                 self._bands, std_names, **kwargs)
                                                               )
         else:
             print("{} was already computed, the current bands are {}".format(vegetation_index, currentbands))
