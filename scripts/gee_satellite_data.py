@@ -10,6 +10,7 @@ import warnings
 import folium
 import geehydro
 import time
+import requests
 
 from datetime import timedelta
 from scripts import gee_functions, s2_functions
@@ -567,7 +568,9 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
         wrongfiles = []
         for url, filename in zip(urls_list, filenames):
             try:
-                wget.download(url, filename + '.zip')
+                #wget.download(url, filename + '.zip')
+                response = requests.get(url)
+                open(filename + '.zip', "wb").write(response.content)
                 general_functions.unzip_geeimages(filename, outputfolder, bands, scale)
                 print('the {} file was downloaded'.format(filename))
 
