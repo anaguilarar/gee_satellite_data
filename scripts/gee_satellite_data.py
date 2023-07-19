@@ -552,7 +552,7 @@ def download_gee_tolocal(geedata_class, outputfolder, regionid="",
             imgcollection = gee_functions.select_imagesfromcollection(imgcollection, listofindexes)
 
         ## get urls list from gee
-        urls_list = gee_functions.get_eeurl(imgcollection, geedata_class._ee_sp['coordinates'], scale)
+        urls_list = gee_functions.get_eeurl(imgcollection, geedata_class._ee_sp.getInfo()['coordinates'], scale)
 
         ## change dates format
 

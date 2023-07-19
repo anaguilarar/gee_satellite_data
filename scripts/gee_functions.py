@@ -84,7 +84,7 @@ def geometry_as_ee(filename):
                 sp_geometry = sp_geometry.to_crs('epsg:4326')
         #
         else:
-            if sp_geometry.crs != 'epsg:4326':
+            if sp_geometry.crs.to_epsg() == 4326:
                 sp_geometry = sp_geometry.to_crs('epsg:4326')
 
     if type(filename) == gpd.geodataframe.GeoDataFrame:
