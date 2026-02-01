@@ -2,7 +2,7 @@ numpy==1.18.5
 ee==0.4
 folium==0.11.0
 geehydro==0.2.0
-geopandas==0.8.1
+geopandas==1.1.2
 pandas==1.1.1
 plotly==4.9.0
 Shapely==1.7.1
